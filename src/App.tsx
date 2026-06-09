@@ -1,22 +1,58 @@
-import { useState } from 'react'
-import Topbar from '@/components/shell/Topbar'
-import TabBar from '@/components/shell/TabBar'
-import ABTestingTab from '@/components/ab/ABTestingTab'
-import ChampionTab from '@/components/champion/ChampionTab'
+import { useEffect } from 'react'
+import Sidebar from './components/shell/Sidebar'
+import Topbar from './components/shell/Topbar'
+import { useStore } from './data/store'
 
-type Tab = 'ab' | 'champion'
+import DashboardPage from './pages/DashboardPage'
+import ExperimentsPage from './pages/ExperimentsPage'
+import CockpitPage from './pages/CockpitPage'
+import AnalyticsPage from './pages/AnalyticsPage'
+import VariantDesignerPage from './pages/VariantDesignerPage'
+import AIInsightsPage from './pages/AIInsightsPage'
+import TournamentsPage from './pages/TournamentsPage'
+import BracketsPage from './pages/BracketsPage'
+import LeaderboardPage from './pages/LeaderboardPage'
+import TeamDetailPage from './pages/TeamDetailPage'
+import AICoachPage from './pages/AICoachPage'
+import UsersPage from './pages/admin/UsersPage'
+import SettingsPage from './pages/admin/SettingsPage'
+import IntegrationsPage from './pages/admin/IntegrationsPage'
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<Tab>('ab')
+  const { activePage, tickLive } = useStore()
+
+  // Simulate live session ticking
+  useEffect(() => {
+    const id = setInterval(tickLive, 3000)
+    return () => clearInterval(id)
+  }, [tickLive])
+
+  const Page = {
+    dashboard: DashboardPage,
+    experiments: ExperimentsPage,
+    'experiment-cockpit': CockpitPage,
+    analytics: AnalyticsPage,
+    'variant-designer': VariantDesignerPage,
+    'ai-insights': AIInsightsPage,
+    tournaments: TournamentsPage,
+    brackets: BracketsPage,
+    leaderboard: LeaderboardPage,
+    'team-detail': TeamDetailPage,
+    'ai-coach': AICoachPage,
+    users: UsersPage,
+    settings: SettingsPage,
+    integrations: IntegrationsPage,
+  }[activePage]
 
   return (
-    <div className="min-h-screen font-sans" style={{ background: '#F3F4F8' }}>
-      <Topbar />
-      <TabBar activeTab={activeTab} onTabChange={setActiveTab} />
-      <main className="max-w-7xl mx-auto px-6 py-6">
-        {activeTab === 'ab'       && <ABTestingTab />}
-        {activeTab === 'champion' && <ChampionTab />}
-      </main>
+    <div className="flex min-h-screen bg-[#F8FAFC] font-sans">
+      <Sidebar />
+      <div className="flex-1 flex flex-col min-w-0">
+        <Topbar />
+        <main className="flex-1 overflow-auto">
+          <Page />
+        </main>
+      </div>
     </div>
   )
 }
