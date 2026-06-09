@@ -4,11 +4,8 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 
 from database import engine, Base, SessionLocal
-from routers import experiments, variants, events, analytics
-from routers import challenges, teams, leaderboard, ai, websocket
-from routers import security
+from routers import api_experiments, api_execution, api_analytics, api_ai
 from seed import seed_demo_data
-from services.rbac import check_rate_limit
 
 
 @asynccontextmanager
@@ -19,9 +16,10 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="XTest Portal API",
-    version="1.0.0",
-    lifespan=lifespan
+    title="XTest API Lab",
+    version="2.0.0",
+    description="Real-time API Experimentation, Traffic Splitting & Response Comparison Platform",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -32,43 +30,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-@app.middleware("http")
-async def rate_limit_middleware(request: Request, call_next):
-    """Global per-IP rate limiter: 300 req / 60 s."""
-    client_ip = request.client.host if request.client else "unknown"
-    key = f"ip:{client_ip}"
-
-    db = SessionLocal()
-    try:
-        allowed, remaining = check_rate_limit(key, limit=300, window_seconds=60, db=db)
-    finally:
-        db.close()
-
-    if not allowed:
-        return JSONResponse(
-            status_code=429,
-            content={"detail": "Rate limit exceeded. Try again in a minute."},
-            headers={"Retry-After": "60", "X-RateLimit-Remaining": "0"},
-        )
-
-    response = await call_next(request)
-    response.headers["X-RateLimit-Remaining"] = str(remaining)
-    return response
-
-
-app.include_router(experiments.router,  prefix="/api/experiments",  tags=["A/B Experiments"])
-app.include_router(variants.router,     prefix="/api/variants",     tags=["Variants"])
-app.include_router(events.router,       prefix="/api/events",       tags=["Events"])
-app.include_router(analytics.router,    prefix="/api/analytics",    tags=["Analytics"])
-app.include_router(challenges.router,   prefix="/api/challenges",   tags=["Challenges"])
-app.include_router(teams.router,        prefix="/api/teams",        tags=["Teams"])
-app.include_router(leaderboard.router,  prefix="/api/leaderboard",  tags=["Leaderboard"])
-app.include_router(ai.router,           prefix="/api/ai",           tags=["AI"])
-app.include_router(security.router,     prefix="/api/security",     tags=["Security"])
-app.include_router(websocket.router,    tags=["WebSocket"])
+app.include_router(api_experiments.router, prefix="/api/experiments",  tags=["Experiments"])
+app.include_router(api_execution.router,   prefix="/api/executions",   tags=["Execution Logs"])
+app.include_router(api_analytics.router,   prefix="/api/analytics",    tags=["Analytics"])
+app.include_router(api_ai.router,          prefix="/api/ai",           tags=["AI Insights"])
 
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "db": "sqlite::memory:"}
+    return {"status": "ok", "service": "XTest API Lab", "version": "2.0.0"}

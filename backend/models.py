@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Float, Integer, DateTime, Text, ForeignKey, Boolean, UniqueConstraint
+from sqlalchemy import Column, String, Float, Integer, Boolean, DateTime, Text, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -8,6 +8,89 @@ from database import Base
 def gen_id():
     return str(uuid.uuid4())
 
+
+class ApiExperiment(Base):
+    __tablename__ = "api_experiments"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    name = Column(String, nullable=False)
+    description = Column(Text, default="")
+    status = Column(String, default="draft")          # draft | running | paused | concluded
+    execution_mode = Column(String, default="ab")     # ab | champion_challenger | shadow
+    environment = Column(String, default="staging")   # dev | staging | prod
+    method = Column(String, default="GET")
+    base_url = Column(String, default="")
+    path = Column(String, default="/")
+    query_params = Column(Text, default="{}")
+    body_template = Column(Text, default="")
+    request_headers = Column(Text, default="{}")
+    auth_type = Column(String, default="none")
+    auth_value = Column(Text, default="")
+    timeout_ms = Column(Integer, default=5000)
+    max_retries = Column(Integer, default=0)
+    scoring_rules = Column(Text, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    concluded_at = Column(DateTime, nullable=True)
+
+    variants = relationship("ApiVariant", back_populates="experiment", cascade="all, delete-orphan")
+    execution_logs = relationship("ExecutionLog", back_populates="experiment", cascade="all, delete-orphan")
+
+
+class ApiVariant(Base):
+    __tablename__ = "api_variants"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    experiment_id = Column(String, ForeignKey("api_experiments.id"), nullable=False)
+    name = Column(String, nullable=False)
+    variant_type = Column(String, default="service_routing")
+    description = Column(Text, default="")
+    weight = Column(Integer, default=50)
+    target_url = Column(String, default="")
+    feature_flags = Column(Text, default="{}")
+    config_overrides = Column(Text, default="{}")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    experiment = relationship("ApiExperiment", back_populates="variants")
+    results = relationship("VariantResult", back_populates="variant", cascade="all, delete-orphan")
+
+
+class ExecutionLog(Base):
+    __tablename__ = "execution_logs"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    experiment_id = Column(String, ForeignKey("api_experiments.id"), nullable=False)
+    request_id = Column(String, default=gen_id)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    request_method = Column(String, default="GET")
+    request_url = Column(String, default="")
+    request_headers = Column(Text, default="{}")
+    request_body = Column(Text, default="")
+    winner_variant_id = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    experiment = relationship("ApiExperiment", back_populates="execution_logs")
+    variant_results = relationship("VariantResult", back_populates="execution_log", cascade="all, delete-orphan")
+
+
+class VariantResult(Base):
+    __tablename__ = "variant_results"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    execution_log_id = Column(String, ForeignKey("execution_logs.id"), nullable=False)
+    variant_id = Column(String, ForeignKey("api_variants.id"), nullable=False)
+    status_code = Column(Integer, default=200)
+    latency_ms = Column(Float, default=0.0)
+    response_body = Column(Text, default="{}")
+    response_headers = Column(Text, default="{}")
+    error_message = Column(Text, nullable=True)
+    payload_size_bytes = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    execution_log = relationship("ExecutionLog", back_populates="variant_results")
+    variant = relationship("ApiVariant", back_populates="results")
+
+
+# ── Security / Users (kept for admin panel) ──────────────────────────────────
 
 class User(Base):
     __tablename__ = "users"
@@ -18,127 +101,12 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
-class Experiment(Base):
-    __tablename__ = "experiments"
-    id                   = Column(String, primary_key=True, default=gen_id)
-    name                 = Column(String, nullable=False)
-    url                  = Column(String, nullable=False)
-    status               = Column(String, default="draft")
-    hypothesis           = Column(Text)
-    goal_metric          = Column(String, default="conversion")
-    traffic_pct          = Column(Float, default=1.0)
-    min_sessions         = Column(Integer, default=1000)
-    max_sessions         = Column(Integer)
-    confidence_threshold = Column(Float, default=0.95)
-    created_at           = Column(DateTime, default=datetime.utcnow)
-    concluded_at         = Column(DateTime)
-    ai_verdict           = Column(Text)
-    owner_id             = Column(String, ForeignKey("users.id"), nullable=False)
-
-    variants = relationship("Variant", back_populates="experiment", cascade="all, delete-orphan")
-    events   = relationship("Event", back_populates="experiment")
-
-
-class Variant(Base):
-    __tablename__ = "variants"
-    id             = Column(String, primary_key=True, default=gen_id)
-    experiment_id  = Column(String, ForeignKey("experiments.id"), nullable=False)
-    key            = Column(String, nullable=False)
-    name           = Column(String, nullable=False)
-    description    = Column(Text)
-    traffic_weight = Column(Float, default=0.5)
-    alpha          = Column(Float, default=1.0)
-    beta           = Column(Float, default=1.0)
-    changes        = Column(Text)
-    created_at     = Column(DateTime, default=datetime.utcnow)
-
-    experiment = relationship("Experiment", back_populates="variants")
-
-
-class SessionAssignment(Base):
-    __tablename__ = "session_assignments"
-    fingerprint   = Column(String, primary_key=True)
-    experiment_id = Column(String, ForeignKey("experiments.id"), primary_key=True)
-    variant_id    = Column(String, ForeignKey("variants.id"), nullable=False)
-    assigned_at   = Column(DateTime, default=datetime.utcnow)
-
-
-class Event(Base):
-    __tablename__ = "events"
-    id            = Column(String, primary_key=True, default=gen_id)
-    experiment_id = Column(String, ForeignKey("experiments.id"), nullable=False)
-    variant_id    = Column(String, ForeignKey("variants.id"), nullable=False)
-    fingerprint   = Column(String, nullable=False)
-    event_type    = Column(String, nullable=False)
-    metadata_     = Column("metadata", Text)
-    device_type   = Column(String)
-    country       = Column(String)
-    is_new_user   = Column(Integer, default=0)
-    session_depth = Column(Integer, default=1)
-    created_at    = Column(DateTime, default=datetime.utcnow)
-
-    experiment = relationship("Experiment", back_populates="events")
-
-
-class Challenge(Base):
-    __tablename__ = "challenges"
-    id             = Column(String, primary_key=True, default=gen_id)
-    name           = Column(String, nullable=False)
-    description    = Column(Text)
-    status         = Column(String, default="draft")
-    scoring_config = Column(Text, nullable=False)
-    total_rounds   = Column(Integer, default=3)
-    current_round  = Column(Integer, default=1)
-    start_date     = Column(DateTime)
-    end_date       = Column(DateTime)
-    created_at     = Column(DateTime, default=datetime.utcnow)
-    ai_analysis    = Column(Text)
-    owner_id       = Column(String, ForeignKey("users.id"), nullable=False)
-
-    teams         = relationship("Team", back_populates="challenge", cascade="all, delete-orphan")
-    round_results = relationship("RoundResult", back_populates="challenge")
-
-
-class Team(Base):
-    __tablename__ = "teams"
-    id            = Column(String, primary_key=True, default=gen_id)
-    challenge_id  = Column(String, ForeignKey("challenges.id"), nullable=False)
-    name          = Column(String, nullable=False)
-    url           = Column(String, nullable=False)
-    members       = Column(Text)
-    experiment_id = Column(String, ForeignKey("experiments.id"))
-    created_at    = Column(DateTime, default=datetime.utcnow)
-
-    challenge = relationship("Challenge", back_populates="teams")
-
-
-class RoundResult(Base):
-    __tablename__ = "round_results"
-    id               = Column(String, primary_key=True, default=gen_id)
-    challenge_id     = Column(String, ForeignKey("challenges.id"), nullable=False)
-    team_id          = Column(String, ForeignKey("teams.id"), nullable=False)
-    round_number     = Column(Integer, nullable=False)
-    cvr              = Column(Float)
-    engagement_score = Column(Float)
-    session_count    = Column(Integer)
-    composite_score  = Column(Float)
-    rank             = Column(Integer)
-    computed_at      = Column(DateTime, default=datetime.utcnow)
-
-    challenge = relationship("Challenge", back_populates="round_results")
-
-
-# ── Security / RBAC ───────────────────────────────────────────────────────────
-
 class Role(Base):
     __tablename__ = "roles"
     id          = Column(String, primary_key=True, default=gen_id)
     name        = Column(String, unique=True, nullable=False)
     description = Column(Text)
     created_at  = Column(DateTime, default=datetime.utcnow)
-
-    permissions = relationship("RolePermission", back_populates="role", cascade="all, delete-orphan")
-    user_roles  = relationship("UserRole", back_populates="role", cascade="all, delete-orphan")
 
 
 class Permission(Base):
@@ -158,18 +126,12 @@ class RolePermission(Base):
     role_id       = Column(String, ForeignKey("roles.id"), primary_key=True)
     permission_id = Column(String, ForeignKey("permissions.id"), primary_key=True)
 
-    role       = relationship("Role", back_populates="permissions")
-    permission = relationship("Permission")
-
 
 class UserRole(Base):
     __tablename__ = "user_roles"
     user_id    = Column(String, ForeignKey("users.id"), primary_key=True)
     role_id    = Column(String, ForeignKey("roles.id"), primary_key=True)
-    granted_by = Column(String, ForeignKey("users.id"))
     granted_at = Column(DateTime, default=datetime.utcnow)
-
-    role = relationship("Role", back_populates="user_roles")
 
 
 class APIToken(Base):
@@ -195,7 +157,6 @@ class AuditLog(Base):
     resource_id = Column(String)
     details     = Column(Text)
     ip_address  = Column(String)
-    user_agent  = Column(String)
     status      = Column(String, default="success")
     created_at  = Column(DateTime, default=datetime.utcnow)
 

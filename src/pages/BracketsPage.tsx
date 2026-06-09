@@ -1,162 +1,250 @@
 import { useState } from 'react'
-import { Trophy, ChevronRight, Swords } from 'lucide-react'
+import { GitCompare, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useStore } from '../data/store'
-import { BracketPair, BracketTeam } from '../types'
+import { ExecutionLog, VariantResult } from '../types'
 
-function TeamCard({ team, winner }: { team?: BracketTeam; winner?: boolean }) {
-  if (!team) {
-    return (
-      <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-dashed border-gray-200 bg-gray-50">
-        <span className="text-xs text-gray-300 font-medium">TBD</span>
-      </div>
-    )
+const STATUS_COLOR = (code: number) =>
+  code < 300 ? 'text-emerald-400' : code < 500 ? 'text-amber-400' : 'text-red-400'
+
+function flatDiff(a: unknown, b: unknown, path = ''): { path: string; aVal: string; bVal: string; differs: boolean }[] {
+  const results: { path: string; aVal: string; bVal: string; differs: boolean }[] = []
+  const aIsObj = a !== null && typeof a === 'object' && !Array.isArray(a)
+  const bIsObj = b !== null && typeof b === 'object' && !Array.isArray(b)
+
+  if (aIsObj && bIsObj) {
+    const keys = Array.from(new Set([...Object.keys(a as object), ...Object.keys(b as object)]))
+    for (const key of keys) {
+      results.push(...flatDiff((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key], path ? `${path}.${key}` : key))
+    }
+  } else {
+    const aStr = JSON.stringify(a) ?? 'undefined'
+    const bStr = JSON.stringify(b) ?? 'undefined'
+    results.push({ path: path || '(root)', aVal: aStr, bVal: bStr, differs: aStr !== bStr })
   }
-  return (
-    <div className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl border transition-all
-      ${winner ? 'border-blue-300 bg-blue-50 shadow-sm' : 'border-gray-200 bg-white'}`}>
-      {winner && <Trophy className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />}
-      <div className="flex-1 min-w-0">
-        <div className="text-xs font-bold text-gray-900 truncate">{team.name}</div>
-        {team.cvr !== null && (
-          <div className="text-[10px] text-gray-400">CVR: {team.cvr}%</div>
-        )}
-      </div>
-      {team.score !== null && (
-        <span className={`text-sm font-bold tabular-nums flex-shrink-0
-          ${winner ? 'text-blue-700' : 'text-gray-700'}`}>
-          {team.score}
-        </span>
-      )}
-    </div>
-  )
+  return results
 }
 
-function MatchCard({ pair, isCurrentRound }: { pair: BracketPair; isCurrentRound: boolean }) {
-  const winner = pair.team_a && pair.team_b
-    ? (pair.team_a.score ?? 0) > (pair.team_b.score ?? 0) ? 'a' : 'b'
-    : null
-
+function VariantPanel({ result, isWinner }: { result: VariantResult; isWinner: boolean }) {
   return (
-    <div className={`bg-white rounded-2xl border shadow-sm overflow-hidden
-      ${isCurrentRound ? 'border-blue-200 ring-1 ring-blue-100' : 'border-gray-100'}`}>
-      {isCurrentRound && (
-        <div className="px-3 py-1.5 bg-blue-600 text-white text-[10px] font-bold uppercase tracking-wide">
-          Live Match
-        </div>
-      )}
-      <div className="p-3 space-y-1.5">
-        <TeamCard team={pair.team_a} winner={winner === 'a'} />
-        <div className="flex items-center gap-2 px-1">
-          <div className="flex-1 h-px bg-gray-100" />
-          <Swords className="w-3 h-3 text-gray-300" />
-          <div className="flex-1 h-px bg-gray-100" />
-        </div>
-        <TeamCard team={pair.team_b} winner={winner === 'b'} />
-      </div>
-    </div>
-  )
-}
-
-export default function BracketsPage() {
-  const { challenges, bracket, selectChallenge, selectedChallengeId } = useStore()
-  const running = challenges.filter(c => c.status === 'running')
-
-  const rounds = Array.from(new Set(bracket.bracket.map(p => p.round))).sort()
-  const roundGroups = rounds.map(r => ({
-    round: r,
-    pairs: bracket.bracket.filter(p => p.round === r),
-    isCurrent: r === bracket.current_round,
-  }))
-
-  return (
-    <div className="p-6 space-y-5 animate-fade-in">
-      {/* Challenge selector */}
-      <div className="flex items-center gap-3 flex-wrap">
-        {running.map(ch => (
-          <button key={ch.id} onClick={() => selectChallenge(ch.id)}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-semibold border transition-all
-              ${(selectedChallengeId ?? running[0]?.id) === ch.id
-                ? 'bg-teal-600 text-white border-teal-600 shadow-md'
-                : 'bg-white text-gray-600 border-gray-200 hover:border-teal-200'}`}>
-            <Trophy className="w-3.5 h-3.5" />
-            {ch.name}
-          </button>
-        ))}
-      </div>
-
-      {/* Bracket header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-bold text-gray-900">{bracket.name}</h2>
-          <p className="text-sm text-gray-400 mt-0.5">
-            Round {bracket.current_round} of {bracket.total_rounds} · {bracket.status}
-          </p>
+    <div className={`flex-1 bg-[#0D1117] border rounded-xl overflow-hidden ${isWinner ? 'border-emerald-500/30' : 'border-white/10'}`}>
+      <div className={`px-4 py-3 flex items-center justify-between border-b ${isWinner ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-white/[0.02] border-white/5'}`}>
+        <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${isWinner ? 'bg-emerald-400' : 'bg-slate-400'}`} />
+          <span className="text-sm font-semibold text-slate-200">{result.variant_name}</span>
         </div>
         <div className="flex items-center gap-2">
-          {rounds.map(r => (
-            <span key={r} className={`text-xs font-semibold px-2.5 py-1 rounded-full
-              ${r === bracket.current_round ? 'bg-teal-100 text-teal-700' : 'bg-gray-100 text-gray-500'}`}>
-              Round {r}
+          <span className={`text-sm font-bold ${STATUS_COLOR(result.status_code)}`}>{result.status_code}</span>
+          <span className={`text-xs font-semibold ${result.latency_ms < 100 ? 'text-emerald-400' : result.latency_ms < 300 ? 'text-amber-400' : 'text-red-400'}`}>
+            {result.latency_ms}ms
+          </span>
+          {isWinner && (
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold">
+              WINNER
             </span>
+          )}
+        </div>
+      </div>
+
+      {/* Response headers */}
+      <div className="px-4 py-3 border-b border-white/5">
+        <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Headers</div>
+        <div className="space-y-1">
+          {Object.entries(result.response_headers).map(([k, v]) => (
+            <div key={k} className="flex gap-2 text-[11px]">
+              <span className="text-slate-500 font-mono flex-shrink-0">{k}:</span>
+              <span className="text-slate-300 font-mono truncate">{v}</span>
+            </div>
           ))}
-          <span className="text-xs px-2.5 py-1 rounded-full bg-gray-100 text-gray-400 font-medium">Final →</span>
         </div>
       </div>
 
-      {/* Bracket view */}
-      <div className="flex gap-6 overflow-x-auto pb-4">
-        {roundGroups.map(({ round, pairs, isCurrent }) => (
-          <div key={round} className="flex-shrink-0 w-60">
-            <div className={`text-xs font-bold uppercase tracking-wide mb-3 flex items-center gap-2
-              ${isCurrent ? 'text-blue-600' : 'text-gray-400'}`}>
-              {isCurrent && <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />}
-              Round {round} {isCurrent ? '(Live)' : ''}
-            </div>
-            <div className="space-y-4">
-              {pairs.map((pair, i) => (
-                <MatchCard key={i} pair={pair} isCurrentRound={isCurrent} />
-              ))}
-            </div>
-          </div>
-        ))}
-        {/* Final placeholder */}
-        <div className="flex-shrink-0 w-60">
-          <div className="text-xs font-bold uppercase tracking-wide mb-3 text-gray-300">Final</div>
-          <div className="bg-white rounded-2xl border-2 border-dashed border-gray-200 p-6 flex flex-col items-center gap-2">
-            <Trophy className="w-8 h-8 text-amber-300" />
-            <span className="text-xs text-gray-400 text-center">Champion will be crowned here</span>
-          </div>
+      {/* Response body */}
+      <div className="px-4 py-3">
+        <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">Response Body</div>
+        <div className="bg-black/30 rounded-lg p-3 overflow-auto max-h-80">
+          <pre className="text-[11px] text-slate-300 font-mono whitespace-pre-wrap">
+            {JSON.stringify(result.response_body, null, 2)}
+          </pre>
         </div>
       </div>
 
-      {/* Score comparison */}
-      <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
-        <div className="text-sm font-bold text-gray-900 mb-4">Current Round Score Comparison</div>
-        <div className="space-y-3">
-          {roundGroups.find(r => r.isCurrent)?.pairs.map((pair, i) => {
-            const max = Math.max(pair.team_a?.score ?? 0, pair.team_b?.score ?? 0, 1)
-            return (
-              <div key={i} className="grid grid-cols-5 gap-3 items-center">
-                <div className="text-right text-xs font-semibold text-gray-700 col-span-1 truncate">{pair.team_a?.name}</div>
-                <div className="col-span-3">
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 h-2.5 bg-gray-100 rounded-full overflow-hidden flex justify-end">
-                      <div className="h-full rounded-full transition-all duration-700 bg-blue-500"
-                        style={{ width: `${((pair.team_a?.score ?? 0) / max) * 100}%` }} />
-                    </div>
-                    <span className="text-[10px] text-gray-300 font-bold w-4 text-center">vs</span>
-                    <div className="flex-1 h-2.5 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full rounded-full transition-all duration-700 bg-teal-500"
-                        style={{ width: `${((pair.team_b?.score ?? 0) / max) * 100}%` }} />
-                    </div>
+      {/* Payload size */}
+      <div className="px-4 py-2.5 border-t border-white/5 flex justify-between text-[10px] text-slate-600">
+        <span>Payload: {(result.payload_size_bytes / 1024).toFixed(1)} KB</span>
+        {result.error && <span className="text-red-400">{result.error}</span>}
+      </div>
+    </div>
+  )
+}
+
+export default function ResponseComparatorPage() {
+  const { executionLogs, experiments, selectExperiment, setPage } = useStore()
+
+  const [filterExp, setFilterExp] = useState<string>('all')
+  const [currentIdx, setCurrentIdx] = useState(0)
+
+  const filtered = filterExp === 'all'
+    ? executionLogs.filter((l) => l.variant_results.length >= 2)
+    : executionLogs.filter((l) => l.experiment_id === filterExp && l.variant_results.length >= 2)
+
+  const log: ExecutionLog | undefined = filtered[currentIdx]
+  const diffEntries = log && log.variant_results.length >= 2
+    ? flatDiff(log.variant_results[0].response_body, log.variant_results[1].response_body)
+    : []
+
+  const changed = diffEntries.filter((d) => d.differs)
+  const unchanged = diffEntries.filter((d) => !d.differs)
+
+  return (
+    <div className="p-6 space-y-5 max-w-screen-2xl">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-xl font-bold text-slate-100">Response Comparator</h2>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Side-by-side JSON diff viewer for variant responses
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <select
+            value={filterExp}
+            onChange={(e) => { setFilterExp(e.target.value); setCurrentIdx(0) }}
+            className="bg-[#0D1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none"
+          >
+            <option value="all">All Experiments</option>
+            {experiments.map((e) => (
+              <option key={e.id} value={e.id}>{e.name}</option>
+            ))}
+          </select>
+          {log && (
+            <button
+              onClick={() => { selectExperiment(log.experiment_id); setPage('cockpit') }}
+              className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+            >
+              View Cockpit →
+            </button>
+          )}
+        </div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div className="flex items-center justify-center py-24">
+          <div className="text-center">
+            <GitCompare className="w-12 h-12 text-slate-700 mx-auto mb-3" />
+            <p className="text-slate-400 font-medium">No execution logs with multiple variants</p>
+            <p className="text-slate-600 text-sm mt-1">Run champion/challenger or shadow experiments to compare responses</p>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Navigation */}
+          <div className="flex items-center justify-between bg-[#0D1117] border border-white/5 rounded-xl px-4 py-3">
+            <button
+              onClick={() => setCurrentIdx(Math.max(0, currentIdx - 1))}
+              disabled={currentIdx === 0}
+              className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <ChevronLeft className="w-4 h-4" /> Previous
+            </button>
+            <div className="text-center">
+              <div className="text-sm font-semibold text-slate-200">
+                {log?.experiment_name}
+              </div>
+              <div className="text-[11px] text-slate-500 mt-0.5 font-mono">
+                {log?.request.method} {log?.request.url}
+              </div>
+              <div className="text-[10px] text-slate-600 mt-0.5">
+                Log {currentIdx + 1} of {filtered.length} · {log && new Date(log.timestamp).toLocaleString()}
+              </div>
+            </div>
+            <button
+              onClick={() => setCurrentIdx(Math.min(filtered.length - 1, currentIdx + 1))}
+              disabled={currentIdx >= filtered.length - 1}
+              className="flex items-center gap-1.5 text-sm text-slate-400 hover:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              Next <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+
+          {log && (
+            <>
+              {/* Side-by-side panels */}
+              <div className="flex gap-4">
+                {log.variant_results.map((r) => (
+                  <VariantPanel
+                    key={r.variant_id}
+                    result={r}
+                    isWinner={r.variant_id === log.winner_variant_id}
+                  />
+                ))}
+              </div>
+
+              {/* JSON Diff Table */}
+              <div className="bg-[#0D1117] border border-white/5 rounded-xl overflow-hidden">
+                <div className="px-5 py-4 border-b border-white/5 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-200">JSON Diff Analysis</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {changed.length} changed fields · {unchanged.length} identical fields
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3 text-[11px]">
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-amber-400" />
+                      <span className="text-slate-500">Changed</span>
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-slate-600" />
+                      <span className="text-slate-500">Identical</span>
+                    </span>
                   </div>
                 </div>
-                <div className="text-xs font-semibold text-gray-700 col-span-1 truncate">{pair.team_b?.name}</div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-white/5">
+                        <th className="px-5 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider w-48">JSON Path</th>
+                        <th className="px-5 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                          {log.variant_results[0]?.variant_name}
+                        </th>
+                        <th className="px-5 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                          {log.variant_results[1]?.variant_name}
+                        </th>
+                        <th className="px-5 py-3 text-center text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Diff</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...changed, ...unchanged].map((entry, i) => (
+                        <tr
+                          key={i}
+                          className={`border-b border-white/5 ${entry.differs ? 'bg-amber-500/5' : ''}`}
+                        >
+                          <td className="px-5 py-2.5 font-mono text-slate-400">{entry.path}</td>
+                          <td className={`px-5 py-2.5 font-mono ${entry.differs ? 'text-red-400' : 'text-slate-400'}`}>
+                            {entry.aVal.length > 60 ? entry.aVal.slice(0, 60) + '…' : entry.aVal}
+                          </td>
+                          <td className={`px-5 py-2.5 font-mono ${entry.differs ? 'text-emerald-400' : 'text-slate-400'}`}>
+                            {entry.bVal.length > 60 ? entry.bVal.slice(0, 60) + '…' : entry.bVal}
+                          </td>
+                          <td className="px-5 py-2.5 text-center">
+                            {entry.differs ? (
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 font-semibold">
+                                CHANGED
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-slate-600">same</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            )
-          })}
-        </div>
-      </div>
+            </>
+          )}
+        </>
+      )}
     </div>
   )
 }

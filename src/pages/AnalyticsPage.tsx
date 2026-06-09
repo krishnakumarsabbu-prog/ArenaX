@@ -2,231 +2,233 @@ import { useState } from 'react'
 import { useStore } from '../data/store'
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend
+  Tooltip, ResponsiveContainer, Legend, RadarChart, Radar, PolarGrid, PolarAngleAxis,
 } from 'recharts'
 
-const funnelData = [
-  { stage: 'Visitors', control: 10000, variant: 10000 },
-  { stage: 'Engaged', control: 6200, variant: 7100 },
-  { stage: 'Add to Cart', control: 2400, variant: 3050 },
-  { stage: 'Checkout', control: 1200, variant: 1700 },
-  { stage: 'Purchase', control: 800, variant: 1180 },
-]
-
-const deviceData = [
-  { name: 'Mobile', value: 58, color: '#2563EB' },
-  { name: 'Desktop', value: 34, color: '#0EA5E9' },
-  { name: 'Tablet', value: 8, color: '#BAE6FD' },
-]
-
-const weeklyData = Array.from({ length: 14 }, (_, i) => ({
-  day: `Day ${i + 1}`,
-  control: 8 + Math.sin(i * 0.5) * 1.5 + Math.random() * 0.5,
-  variant: 9.5 + Math.sin(i * 0.5 + 0.5) * 1.2 + Math.random() * 0.5,
-}))
-
-const TABS = ['Metrics', 'Funnels', 'Segments', 'Confidence'] as const
-type Tab = typeof TABS[number]
-
 export default function AnalyticsPage() {
-  const { experiments, analyticsMap } = useStore()
-  const [tab, setTab] = useState<Tab>('Metrics')
-  const [expId, setExpId] = useState(experiments[0]?.id ?? '')
-  const analytics = analyticsMap[expId]
+  const { experiments, analyticsMap, selectExperiment, setPage } = useStore()
+  const [selectedExpId, setSelectedExpId] = useState(
+    experiments.find((e) => e.status === 'running')?.id ?? experiments[0]?.id ?? ''
+  )
+
+  const exp = experiments.find((e) => e.id === selectedExpId)
+  const analytics = analyticsMap[selectedExpId]
+
+  const latencyChartData = analytics?.latency_trend.filter((_, i) => i % 2 === 0) ?? []
+
+  const variantBarData = analytics?.variant_metrics.map((m) => ({
+    name: m.variant_name.length > 18 ? m.variant_name.slice(0, 18) + '…' : m.variant_name,
+    'Avg (ms)': m.avg_latency_ms,
+    'p50 (ms)': m.p50_latency_ms,
+    'p95 (ms)': m.p95_latency_ms,
+    'p99 (ms)': m.p99_latency_ms,
+  })) ?? []
+
+  const errorBarData = analytics?.variant_metrics.map((m) => ({
+    name: m.variant_name.length > 18 ? m.variant_name.slice(0, 18) + '…' : m.variant_name,
+    'Error Rate %': m.error_rate,
+    'Success Rate %': m.success_rate,
+    'Score': m.score,
+  })) ?? []
+
+  const radarData = analytics?.variant_metrics.map((m) => ({
+    subject: m.variant_name.length > 14 ? m.variant_name.slice(0, 14) + '…' : m.variant_name,
+    latency: Math.round(100 - (m.avg_latency_ms / 500) * 100),
+    errorRate: Math.round(100 - m.error_rate * 10),
+    throughput: Math.round((m.request_count / (analytics?.total_requests || 1)) * 100),
+    score: Math.round(m.score),
+    payloadSize: Math.round(100 - (m.avg_payload_size / 3000) * 100),
+  })) ?? []
 
   return (
-    <div className="p-6 space-y-5 animate-fade-in">
-      {/* Header controls */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+    <div className="p-6 space-y-6 max-w-screen-2xl">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-lg font-bold text-gray-900">Analytics Hub</h2>
-          <p className="text-sm text-gray-400 mt-0.5">Deep-dive metrics across all experiments</p>
+          <h2 className="text-xl font-bold text-slate-100">Analytics Hub</h2>
+          <p className="text-sm text-slate-500 mt-0.5">Latency, error rates, throughput, and variant performance analysis</p>
         </div>
-        <select value={expId} onChange={e => setExpId(e.target.value)}
-          className="input w-auto text-sm">
-          {experiments.map(e => (
-            <option key={e.id} value={e.id}>{e.name}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex items-center gap-1 bg-white border border-gray-100 rounded-xl p-1 w-fit shadow-sm">
-        {TABS.map((t) => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all
-              ${tab === t ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
-            {t}
+        <div className="flex items-center gap-3">
+          <select
+            value={selectedExpId}
+            onChange={(e) => setSelectedExpId(e.target.value)}
+            className="bg-[#0D1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-200 outline-none"
+          >
+            {experiments.filter((e) => e.total_requests > 0).map((e) => (
+              <option key={e.id} value={e.id}>{e.name}</option>
+            ))}
+          </select>
+          <button
+            onClick={() => { selectExperiment(selectedExpId); setPage('cockpit') }}
+            className="px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-xs text-slate-400 hover:text-slate-200 hover:bg-white/10 transition-colors"
+          >
+            View Cockpit →
           </button>
-        ))}
+        </div>
       </div>
 
-      {tab === 'Metrics' && (
-        <div className="space-y-5">
+      {!analytics ? (
+        <div className="flex items-center justify-center py-20">
+          <div className="text-center">
+            <p className="text-slate-500">No analytics data available for this experiment.</p>
+            <p className="text-slate-600 text-sm mt-1">Select a running or concluded experiment with execution data.</p>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Summary KPIs */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              { label: 'Total Sessions', value: analytics?.total_sessions.toLocaleString() ?? '—', delta: '+12.4%', up: true },
-              { label: 'Overall CVR', value: '11.2%', delta: '+1.8pp', up: true },
-              { label: 'Statistical Confidence', value: `${analytics?.overall_confidence?.toFixed(0) ?? '—'}%`, delta: '+5.2pp', up: true },
-              { label: 'Days Running', value: String(analytics?.days_running ?? '—'), delta: null, up: true },
-            ].map((m) => (
-              <div key={m.label} className="bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
-                <div className="text-2xl font-bold text-gray-900 tabular-nums">{m.value}</div>
-                <div className="text-xs text-gray-500 mt-0.5">{m.label}</div>
-                {m.delta && (
-                  <div className={`text-xs font-semibold mt-1 ${m.up ? 'text-green-600' : 'text-red-500'}`}>
-                    {m.up ? '▲' : '▼'} {m.delta}
-                  </div>
-                )}
+              { label: 'Total Requests', value: (analytics.total_requests / 1000).toFixed(1) + 'k', color: 'text-blue-400' },
+              { label: 'Avg Latency', value: analytics.avg_latency_ms.toFixed(0) + 'ms', color: analytics.avg_latency_ms < 100 ? 'text-emerald-400' : analytics.avg_latency_ms < 300 ? 'text-amber-400' : 'text-red-400' },
+              { label: 'Error Rate', value: analytics.error_rate.toFixed(2) + '%', color: analytics.error_rate < 1 ? 'text-emerald-400' : analytics.error_rate < 3 ? 'text-amber-400' : 'text-red-400' },
+              { label: 'Variants', value: analytics.variant_metrics.length, color: 'text-cyan-400' },
+            ].map((kpi) => (
+              <div key={kpi.label} className="bg-[#0D1117] border border-white/5 rounded-xl p-4 text-center">
+                <div className={`text-2xl font-bold ${kpi.color}`}>{kpi.value}</div>
+                <div className="text-xs text-slate-500 mt-1">{kpi.label}</div>
               </div>
             ))}
           </div>
 
-          <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
-            <div className="text-sm font-bold text-gray-900 mb-4">Conversion Rate Over Time</div>
+          {/* Latency trend */}
+          <div className="bg-[#0D1117] border border-white/5 rounded-xl p-5">
+            <div className="mb-4">
+              <h3 className="text-sm font-semibold text-slate-200">Latency Trend (24h)</h3>
+              <p className="text-xs text-slate-500 mt-0.5">p50 / p95 / p99 percentiles over time</p>
+            </div>
             <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={weeklyData}>
+              <AreaChart data={latencyChartData}>
                 <defs>
-                  <linearGradient id="controlGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#94A3B8" stopOpacity={0.2} />
-                    <stop offset="95%" stopColor="#94A3B8" stopOpacity={0} />
-                  </linearGradient>
-                  <linearGradient id="variantGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#2563EB" stopOpacity={0.2} />
-                    <stop offset="95%" stopColor="#2563EB" stopOpacity={0} />
-                  </linearGradient>
+                  {[
+                    { id: 'g50', color: '#3B82F6' },
+                    { id: 'g95', color: '#0EA5E9' },
+                    { id: 'g99', color: '#06B6D4' },
+                  ].map((g) => (
+                    <linearGradient key={g.id} id={g.id} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={g.color} stopOpacity={0.2} />
+                      <stop offset="95%" stopColor={g.color} stopOpacity={0} />
+                    </linearGradient>
+                  ))}
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
-                <XAxis dataKey="day" tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} width={35} tickFormatter={v => `${v.toFixed(0)}%`} />
-                <Tooltip contentStyle={{ borderRadius: 8, border: '1px solid #E2E8F0', fontSize: 11 }} formatter={(v: number) => [`${v.toFixed(2)}%`]} />
-                <Area type="monotone" dataKey="control" stroke="#94A3B8" strokeWidth={2} fill="url(#controlGrad)" name="Control" />
-                <Area type="monotone" dataKey="variant" stroke="#2563EB" strokeWidth={2} fill="url(#variantGrad)" name="Variant" />
+                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff06" />
+                <XAxis dataKey="hour" tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} axisLine={false} interval={3} />
+                <YAxis tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} axisLine={false} unit="ms" />
+                <Tooltip
+                  contentStyle={{ background: '#0D1117', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 11 }}
+                  formatter={(v: unknown) => [`${v}ms`]}
+                />
+                <Legend formatter={(v) => <span className="text-slate-400 text-xs">{v}</span>} />
+                <Area type="monotone" dataKey="p50" name="p50" stroke="#3B82F6" fill="url(#g50)" strokeWidth={2} dot={false} />
+                <Area type="monotone" dataKey="p95" name="p95" stroke="#0EA5E9" fill="url(#g95)" strokeWidth={1.5} dot={false} />
+                <Area type="monotone" dataKey="p99" name="p99" stroke="#06B6D4" fill="url(#g99)" strokeWidth={1.5} dot={false} strokeDasharray="4 2" />
               </AreaChart>
             </ResponsiveContainer>
           </div>
-        </div>
-      )}
 
-      {tab === 'Funnels' && (
-        <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
-          <div className="text-sm font-bold text-gray-900 mb-4">Conversion Funnel</div>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={funnelData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9" />
-              <XAxis dataKey="stage" tick={{ fontSize: 11, fill: '#64748B' }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 10, fill: '#94A3B8' }} axisLine={false} tickLine={false} width={50} tickFormatter={v => v.toLocaleString()} />
-              <Tooltip contentStyle={{ borderRadius: 8, border: '1px solid #E2E8F0', fontSize: 11 }} />
-              <Bar dataKey="control" fill="#94A3B8" radius={[4, 4, 0, 0]} name="Control" />
-              <Bar dataKey="variant" fill="#2563EB" radius={[4, 4, 0, 0]} name="Variant" />
-            </BarChart>
-          </ResponsiveContainer>
-          <div className="grid grid-cols-5 gap-2 mt-4">
-            {funnelData.map((d, i) => {
-              const lift = ((d.variant - d.control) / d.control * 100).toFixed(0)
-              return (
-                <div key={i} className="text-center">
-                  <div className="text-xs font-semibold text-gray-500">{d.stage}</div>
-                  <div className={`text-xs font-bold mt-0.5 ${Number(lift) > 0 ? 'text-green-600' : 'text-red-500'}`}>
-                    {Number(lift) > 0 ? '+' : ''}{lift}%
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      {tab === 'Segments' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
-            <div className="text-sm font-bold text-gray-900 mb-4">Device Split</div>
-            <div className="flex items-center gap-4">
-              <ResponsiveContainer width={160} height={160}>
-                <PieChart>
-                  <Pie data={deviceData} cx="50%" cy="50%" innerRadius={45} outerRadius={70} dataKey="value" paddingAngle={3}>
-                    {deviceData.map((d, i) => <Cell key={i} fill={d.color} />)}
-                  </Pie>
-                </PieChart>
+          {/* Charts row */}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            {/* Variant latency comparison */}
+            <div className="bg-[#0D1117] border border-white/5 rounded-xl p-5">
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold text-slate-200">Variant Latency Breakdown</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Avg, p50, p95, p99 per variant</p>
+              </div>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={variantBarData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff06" />
+                  <XAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} axisLine={false} unit="ms" />
+                  <Tooltip
+                    contentStyle={{ background: '#0D1117', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 11 }}
+                  />
+                  <Bar dataKey="Avg (ms)" fill="#3B82F6" radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="p95 (ms)" fill="#0EA5E9" radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="p99 (ms)" fill="#06B6D4" radius={[2, 2, 0, 0]} />
+                </BarChart>
               </ResponsiveContainer>
-              <div className="space-y-2">
-                {deviceData.map((d) => (
-                  <div key={d.name} className="flex items-center gap-2">
-                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: d.color }} />
-                    <span className="text-xs text-gray-600">{d.name}</span>
-                    <span className="text-xs font-bold text-gray-900 ml-auto">{d.value}%</span>
-                  </div>
-                ))}
-              </div>
             </div>
-          </div>
-          {analytics && Object.entries(analytics.segment_breakdown).map(([seg, rows]) => (
-            <div key={seg} className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
-              <div className="text-sm font-bold text-gray-900 mb-4 capitalize">{seg} Breakdown</div>
-              <div className="space-y-3">
-                {rows.map((row) => (
-                  <div key={row.value} className="space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="text-gray-600 capitalize font-medium">{row.value}</span>
-                      <span className={`font-bold ${row.lift > 0 ? 'text-green-700' : 'text-red-600'}`}>
-                        {row.lift > 0 ? '+' : ''}{row.lift}%
-                      </span>
-                    </div>
-                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full rounded-full"
-                        style={{
-                          width: `${Math.min(100, Math.abs(row.lift) * 3.5 + 40)}%`,
-                          background: row.lift > 0 ? '#10B981' : '#EF4444'
-                        }} />
-                    </div>
-                    <div className="text-[10px] text-gray-400">Winner: {row.winner_variant}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
 
-      {tab === 'Confidence' && (
-        <div className="space-y-5">
-          <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm">
-            <div className="text-sm font-bold text-gray-900 mb-4">Confidence by Variant</div>
-            {analytics ? (
-              <div className="space-y-4">
-                {analytics.variant_stats.filter(v => v.variant_key !== 'control').map(v => (
-                  <div key={v.variant_id}>
-                    <div className="flex justify-between mb-1.5">
-                      <span className="text-xs font-semibold text-gray-700">{v.variant_name}</span>
-                      <span className="text-xs font-bold tabular-nums" style={{
-                        color: v.confidence >= 95 ? '#10B981' : v.confidence >= 80 ? '#F59E0B' : '#3B82F6'
-                      }}>{v.confidence.toFixed(1)}%</span>
-                    </div>
-                    <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full rounded-full transition-all duration-700"
-                        style={{
-                          width: `${v.confidence}%`,
-                          background: v.confidence >= 95 ? 'linear-gradient(90deg,#10B981,#34D399)' :
-                            v.confidence >= 80 ? 'linear-gradient(90deg,#F59E0B,#FBBF24)' :
-                            'linear-gradient(90deg,#2563EB,#60A5FA)'
-                        }} />
-                    </div>
-                  </div>
-                ))}
-                <div className="mt-2 flex items-center gap-4 pt-2 border-t border-gray-50">
-                  {[{ label: '≥95% — Significant', color: '#10B981' }, { label: '≥80% — Near', color: '#F59E0B' }, { label: '<80% — Building', color: '#3B82F6' }].map(l => (
-                    <div key={l.label} className="flex items-center gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-full" style={{ background: l.color }} />
-                      <span className="text-[10px] text-gray-500">{l.label}</span>
-                    </div>
-                  ))}
-                </div>
+            {/* Error rate + score */}
+            <div className="bg-[#0D1117] border border-white/5 rounded-xl p-5">
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold text-slate-200">Success Rate & Score</h3>
+                <p className="text-xs text-slate-500 mt-0.5">Error rate, success rate, and composite score per variant</p>
               </div>
-            ) : (
-              <p className="text-sm text-gray-400">Select an experiment with analytics data.</p>
-            )}
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={errorBarData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#ffffff06" />
+                  <XAxis dataKey="name" tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fill: '#64748b', fontSize: 10 }} tickLine={false} axisLine={false} />
+                  <Tooltip
+                    contentStyle={{ background: '#0D1117', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 11 }}
+                  />
+                  <Bar dataKey="Success Rate %" fill="#10B981" radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="Score" fill="#3B82F6" radius={[2, 2, 0, 0]} />
+                  <Bar dataKey="Error Rate %" fill="#EF4444" radius={[2, 2, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           </div>
-        </div>
+
+          {/* Detailed variant metrics table */}
+          <div className="bg-[#0D1117] border border-white/5 rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-white/5">
+              <h3 className="text-sm font-semibold text-slate-200">Variant Metrics Detail</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-white/5">
+                    {['Variant', 'Requests', 'Avg Latency', 'p50', 'p95', 'p99', 'Error Rate', 'Success Rate', 'Avg Payload', 'Score'].map((h) => (
+                      <th key={h} className="px-4 py-3 text-left text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {analytics.variant_metrics.map((m) => {
+                    const isWinner = m.variant_id === analytics.winner_variant_id
+                    return (
+                      <tr key={m.variant_id} className={`border-b border-white/5 ${isWinner ? 'bg-emerald-500/5' : 'hover:bg-white/[0.02]'}`}>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            {isWinner && <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold flex-shrink-0">WIN</span>}
+                            <span className="text-xs font-medium text-slate-200">{m.variant_name}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-slate-300">{(m.request_count / 1000).toFixed(1)}k</td>
+                        <td className="px-4 py-3 text-xs font-semibold text-cyan-400">{m.avg_latency_ms}ms</td>
+                        <td className="px-4 py-3 text-xs text-slate-400">{m.p50_latency_ms}ms</td>
+                        <td className="px-4 py-3 text-xs text-slate-400">{m.p95_latency_ms}ms</td>
+                        <td className="px-4 py-3 text-xs text-slate-400">{m.p99_latency_ms}ms</td>
+                        <td className="px-4 py-3">
+                          <span className={`text-xs font-semibold ${m.error_rate < 1 ? 'text-emerald-400' : m.error_rate < 3 ? 'text-amber-400' : 'text-red-400'}`}>
+                            {m.error_rate.toFixed(2)}%
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-emerald-400">{m.success_rate.toFixed(1)}%</td>
+                        <td className="px-4 py-3 text-xs text-slate-400">{(m.avg_payload_size / 1024).toFixed(1)}KB</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden w-16">
+                              <div
+                                className={`h-full rounded-full ${isWinner ? 'bg-emerald-500' : 'bg-blue-500'}`}
+                                style={{ width: `${m.score}%` }}
+                              />
+                            </div>
+                            <span className="text-xs font-bold text-slate-100">{m.score.toFixed(1)}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
     </div>
   )

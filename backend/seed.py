@@ -1,415 +1,480 @@
-"""Seed demo data into the in-memory database on startup."""
+"""Seed demo data for XTest API Lab."""
 import json
 import uuid
-from datetime import datetime, timedelta
 import random
+from datetime import datetime, timedelta
 
 from database import SessionLocal
 import models
-from services.rbac import generate_token
 
 
 def _id():
     return str(uuid.uuid4())
 
 
-def _seed_rbac(db, user_id: str):
-    """Seed permissions, roles, and assign admin role to demo user."""
-
-    # Permissions matrix: resource → [actions]
-    permission_defs = [
-        ("experiments", "read"),
-        ("experiments", "write"),
-        ("experiments", "delete"),
-        ("variants",    "read"),
-        ("variants",    "write"),
-        ("variants",    "delete"),
-        ("events",      "read"),
-        ("events",      "write"),
-        ("analytics",   "read"),
-        ("challenges",  "read"),
-        ("challenges",  "write"),
-        ("challenges",  "delete"),
-        ("teams",       "read"),
-        ("teams",       "write"),
-        ("leaderboard", "read"),
-        ("ai",          "read"),
-        ("ai",          "write"),
-        ("users",       "read"),
-        ("users",       "write"),
-        ("roles",       "read"),
-        ("roles",       "write"),
-        ("roles",       "delete"),
-        ("audit_logs",  "read"),
-        ("api_tokens",  "read"),
-        ("api_tokens",  "write"),
-    ]
-
-    perms = {}
-    for resource, action in permission_defs:
-        name = f"{resource}:{action}"
-        p = models.Permission(
-            id=_id(),
-            name=name,
-            resource=resource,
-            action=action,
-            description=f"Can {action} {resource}",
-        )
-        db.add(p)
-        perms[name] = p
-
-    db.flush()
-
-    # Roles
-    admin_role = models.Role(
-        id=_id(),
-        name="admin",
-        description="Full platform access",
-    )
-    editor_role = models.Role(
-        id=_id(),
-        name="editor",
-        description="Can manage experiments and challenges",
-    )
-    viewer_role = models.Role(
-        id=_id(),
-        name="viewer",
-        description="Read-only access",
-    )
-    analyst_role = models.Role(
-        id=_id(),
-        name="analyst",
-        description="Read experiments and analytics; can trigger AI synthesis",
-    )
-
-    db.add_all([admin_role, editor_role, viewer_role, analyst_role])
-    db.flush()
-
-    # Assign all permissions to admin
-    for p in perms.values():
-        db.add(models.RolePermission(role_id=admin_role.id, permission_id=p.id))
-
-    # Editor: read/write experiments, variants, challenges, teams; read analytics/leaderboard/ai
-    editor_perm_names = [
-        "experiments:read", "experiments:write",
-        "variants:read", "variants:write",
-        "events:read", "events:write",
-        "analytics:read",
-        "challenges:read", "challenges:write",
-        "teams:read", "teams:write",
-        "leaderboard:read",
-        "ai:read", "ai:write",
-        "users:read",
-        "roles:read",
-    ]
-    for name in editor_perm_names:
-        if name in perms:
-            db.add(models.RolePermission(role_id=editor_role.id, permission_id=perms[name].id))
-
-    # Viewer: read-only everything
-    viewer_perm_names = [
-        "experiments:read", "variants:read", "events:read", "analytics:read",
-        "challenges:read", "teams:read", "leaderboard:read", "ai:read",
-        "users:read", "roles:read",
-    ]
-    for name in viewer_perm_names:
-        if name in perms:
-            db.add(models.RolePermission(role_id=viewer_role.id, permission_id=perms[name].id))
-
-    # Analyst: read experiments/analytics + trigger AI
-    analyst_perm_names = [
-        "experiments:read", "variants:read", "analytics:read",
-        "ai:read", "ai:write", "leaderboard:read",
-    ]
-    for name in analyst_perm_names:
-        if name in perms:
-            db.add(models.RolePermission(role_id=analyst_role.id, permission_id=perms[name].id))
-
-    db.flush()
-
-    # Assign admin role to demo user
-    db.add(models.UserRole(user_id=user_id, role_id=admin_role.id, granted_by=user_id))
-    db.flush()
-
-    # Seed a demo API token
-    raw_token, prefix, token_hash = generate_token()
-    demo_token = models.APIToken(
-        id=_id(),
-        user_id=user_id,
-        name="Demo API Token",
-        token_hash=token_hash,
-        prefix=prefix,
-        scopes=json.dumps(["experiments:read", "analytics:read"]),
-        is_active=True,
-    )
-    db.add(demo_token)
-    db.flush()
-
-    # Seed some audit log entries
-    audit_entries = [
-        ("create", "experiment", "Checkout CTA Copy Test", "success"),
-        ("update", "experiment", "Homepage Hero Image", "success"),
-        ("delete", "variant", "old-variant-id", "success"),
-        ("create", "challenge", "Q3 Growth Hackathon", "success"),
-        ("assign_role", "user", user_id, "success"),
-        ("create_token", "api_token", demo_token.id, "success"),
-    ]
-    for action, resource, resource_id, status in audit_entries:
-        db.add(models.AuditLog(
-            id=_id(),
-            user_id=user_id,
-            action=action,
-            resource=resource,
-            resource_id=resource_id,
-            details=f"{action} on {resource}",
-            ip_address="127.0.0.1",
-            user_agent="XTest/1.0 seed",
-            status=status,
-            created_at=datetime.utcnow() - timedelta(hours=random.randint(1, 72)),
-        ))
-
-    db.flush()
-
-
 def seed_demo_data():
     db = SessionLocal()
     try:
-        # Skip if already seeded
-        if db.query(models.User).first():
+        if db.query(models.ApiExperiment).first():
             return
 
         # ── Users ──────────────────────────────────────────────────────────────
-        user = models.User(
-            id="demo-user-id",
-            name="Kai Patel",
-            email="kai@xtest.io",
-            initials="KP"
-        )
+        user = models.User(id="demo-user-id", name="Kai Patel", email="kai@xtest.io", initials="KP")
         db.add(user)
+
+        # Roles
+        admin_role = models.Role(id=_id(), name="admin", description="Full platform access")
+        editor_role = models.Role(id=_id(), name="editor", description="Can manage experiments")
+        viewer_role = models.Role(id=_id(), name="viewer", description="Read-only access")
+        db.add_all([admin_role, editor_role, viewer_role])
         db.flush()
 
-        # ── RBAC ───────────────────────────────────────────────────────────────
-        _seed_rbac(db, "demo-user-id")
+        db.add(models.UserRole(user_id="demo-user-id", role_id=admin_role.id))
+        db.flush()
 
-        # ── Experiments ────────────────────────────────────────────────────────
-        experiments_data = [
-            {
-                "name": "Checkout CTA Copy Test",
-                "url": "https://demo.xtest.io/checkout",
-                "status": "running",
-                "hypothesis": "Changing 'Buy Now' to 'Get Yours Today' will reduce friction and increase checkout CVR by 12%.",
-                "goal_metric": "conversion",
-                "min_sessions": 2000,
-                "confidence_threshold": 0.95,
-            },
-            {
-                "name": "Homepage Hero Image",
-                "url": "https://demo.xtest.io/",
-                "status": "running",
-                "hypothesis": "A lifestyle hero image outperforms product-only imagery for top-of-funnel engagement.",
-                "goal_metric": "click",
-                "min_sessions": 1500,
-                "confidence_threshold": 0.90,
-            },
-            {
-                "name": "Pricing Page Layout",
-                "url": "https://demo.xtest.io/pricing",
-                "status": "concluded",
-                "hypothesis": "3-column pricing with a highlighted 'Most Popular' tier increases plan selection rate.",
-                "goal_metric": "conversion",
-                "min_sessions": 1000,
-                "confidence_threshold": 0.95,
-                "ai_verdict": json.dumps({
-                    "hypothesis_confirmed": True,
-                    "verdict_summary": "The 3-column highlighted layout increased conversions by 18.4% with 97.2% confidence. The 'Most Popular' badge created strong anchoring effect.",
-                    "winner_variant": "variant_b",
-                    "key_insights": ["Highlighted tier drives 2.1x more clicks", "Mobile CVR improved 23%"],
-                    "key_segments": ["Mobile users saw 23% higher lift", "New users responded 2x better"],
-                    "next_tests": ["Test CTA button color", "Test annual vs monthly toggle prominence"],
-                    "confidence_level": "high",
-                    "raw_analysis": "Strong statistical evidence supports the hypothesis. Winner variant outperformed control across all device types."
-                })
-            },
-            {
-                "name": "Onboarding Flow Step 2",
-                "url": "https://demo.xtest.io/onboarding/step-2",
-                "status": "draft",
-                "hypothesis": "Reducing form fields from 7 to 4 will decrease abandonment by 25%.",
-                "goal_metric": "conversion",
-                "min_sessions": 500,
-                "confidence_threshold": 0.95,
-            },
-        ]
+        # ── Experiment 1: Recommendation Engine Migration ─────────────────────
+        exp1_id = _id()
+        var1a_id = _id()  # Baseline sklearn
+        var1b_id = _id()  # Challenger PyTorch
 
-        exp_ids = []
-        for i, ed in enumerate(experiments_data):
-            exp_id = _id()
-            exp_ids.append(exp_id)
-            ai_verdict = ed.pop("ai_verdict", None)
-            exp = models.Experiment(
-                id=exp_id,
-                owner_id="demo-user-id",
-                created_at=datetime.utcnow() - timedelta(days=random.randint(2, 30)),
-                ai_verdict=ai_verdict,
-                **ed
-            )
-            db.add(exp)
-            db.flush()
-
-            # Control variant
-            ctrl_id = _id()
-            db.add(models.Variant(
-                id=ctrl_id,
-                experiment_id=exp_id,
-                key="control",
-                name="Control",
-                description="Original page — no changes",
-                alpha=float(random.randint(40, 200)),
-                beta=float(random.randint(900, 2000)),
-                changes="[]"
-            ))
-
-            # Treatment variant
-            var_b_id = _id()
-            db.add(models.Variant(
-                id=var_b_id,
-                experiment_id=exp_id,
-                key="variant_b",
-                name="Variant B",
-                description="Test variant",
-                alpha=float(random.randint(60, 250)),
-                beta=float(random.randint(800, 1800)),
-                changes=json.dumps([{
-                    "selector": "#cta-button",
-                    "property": "textContent",
-                    "value": "Get Started Today"
-                }])
-            ))
-            db.flush()
-
-            # Seed events for running/concluded experiments
-            if ed.get("status") in ("running", "concluded"):
-                devices = ["desktop", "mobile", "tablet"]
-                countries = ["US", "GB", "CA", "AU", "DE"]
-                for variant_id in [ctrl_id, var_b_id]:
-                    n_imp = random.randint(400, 1200)
-                    n_conv = random.randint(int(n_imp * 0.03), int(n_imp * 0.12))
-                    for _ in range(n_imp):
-                        fp = _id()[:16]
-                        db.add(models.Event(
-                            id=_id(),
-                            experiment_id=exp_id,
-                            variant_id=variant_id,
-                            fingerprint=fp,
-                            event_type="impression",
-                            device_type=random.choice(devices),
-                            country=random.choice(countries),
-                            is_new_user=random.randint(0, 1),
-                            created_at=datetime.utcnow() - timedelta(
-                                hours=random.randint(0, 240)
-                            )
-                        ))
-                    for _ in range(n_conv):
-                        fp = _id()[:16]
-                        db.add(models.Event(
-                            id=_id(),
-                            experiment_id=exp_id,
-                            variant_id=variant_id,
-                            fingerprint=fp,
-                            event_type="conversion",
-                            device_type=random.choice(devices),
-                            country=random.choice(countries),
-                            is_new_user=random.randint(0, 1),
-                            created_at=datetime.utcnow() - timedelta(
-                                hours=random.randint(0, 240)
-                            )
-                        ))
-
-        db.commit()
-
-        # ── Challenges ─────────────────────────────────────────────────────────
-        challenge_id = _id()
-        challenge = models.Challenge(
-            id=challenge_id,
-            name="Q3 Growth Hackathon",
-            description="Compete to drive the highest conversion lift across your landing pages.",
+        exp1 = models.ApiExperiment(
+            id=exp1_id,
+            name="Recommendation Engine Migration",
+            description="Compare v1 sklearn collaborative filtering vs v2 PyTorch deep learning model for real-time recommendations",
             status="running",
-            scoring_config=json.dumps({"cvr_weight": 0.6, "engagement_weight": 0.25, "session_volume_weight": 0.15}),
-            total_rounds=3,
-            current_round=2,
-            start_date=datetime.utcnow() - timedelta(days=14),
-            end_date=datetime.utcnow() + timedelta(days=7),
-            owner_id="demo-user-id"
+            execution_mode="champion_challenger",
+            environment="staging",
+            method="POST",
+            base_url="https://api.internal",
+            path="/v1/recommendations",
+            query_params=json.dumps({"limit": "10", "user_type": "{{user_type}}"}),
+            body_template='{"user_id": "{{user_id}}", "context": "homepage", "session_id": "{{session_id}}"}',
+            request_headers=json.dumps({"Content-Type": "application/json", "X-App-Version": "3.2.0"}),
+            auth_type="bearer",
+            auth_value="***",
+            timeout_ms=500,
+            max_retries=2,
+            scoring_rules=json.dumps({
+                "success_status": 200,
+                "latency_weight": 0.4,
+                "error_weight": 0.4,
+                "business_metric_weight": 0.2,
+                "business_metric_path": "data.click_through_rate"
+            }),
+            created_at=datetime.utcnow() - timedelta(days=18),
         )
-        db.add(challenge)
+        db.add(exp1)
+        db.add(models.ApiVariant(
+            id=var1a_id, experiment_id=exp1_id,
+            name="Baseline (sklearn v1)", variant_type="model",
+            description="Production sklearn collaborative filtering model v1.2.3",
+            weight=50, target_url="https://ml-service-v1.internal/recommend",
+        ))
+        db.add(models.ApiVariant(
+            id=var1b_id, experiment_id=exp1_id,
+            name="Challenger (PyTorch v2)", variant_type="model",
+            description="New PyTorch neural collaborative filtering model v2.0.1",
+            weight=50, target_url="https://ml-service-v2.internal/recommend",
+        ))
         db.flush()
 
-        teams_data = [
-            ("Team Alpha", "https://alpha.demo.io", ["Alice Chen", "Bob Kim"]),
-            ("Team Nexus", "https://nexus.demo.io", ["Carol Wu", "Dave Singh"]),
-            ("Team Orbit", "https://orbit.demo.io", ["Eve Park", "Frank Lee"]),
-            ("Team Pulse", "https://pulse.demo.io", ["Grace Tan", "Hiro Nakamura"]),
+        # Execution logs for exp1
+        recs_v1 = [
+            {"id": "p1", "title": "Premium Headphones", "score": 0.91},
+            {"id": "p2", "title": "Wireless Speaker", "score": 0.87},
+            {"id": "p3", "title": "Smartwatch Pro", "score": 0.84},
         ]
-
-        team_ids = []
-        for tname, turl, tmembers in teams_data:
-            tid = _id()
-            team_ids.append(tid)
-            db.add(models.Team(
-                id=tid,
-                challenge_id=challenge_id,
-                name=tname,
-                url=turl,
-                members=json.dumps(tmembers),
-                experiment_id=exp_ids[0] if len(exp_ids) > 0 else None
+        recs_v2 = [
+            {"id": "p1", "title": "Premium Headphones", "score": 0.96},
+            {"id": "p4", "title": "Noise Cancelling Buds", "score": 0.93},
+            {"id": "p2", "title": "Wireless Speaker", "score": 0.89},
+        ]
+        for i in range(12):
+            log_id = _id()
+            lat_a = round(random.uniform(130, 210), 1)
+            lat_b = round(random.uniform(75, 130), 1)
+            ts = datetime.utcnow() - timedelta(hours=random.randint(0, 72))
+            log = models.ExecutionLog(
+                id=log_id, experiment_id=exp1_id,
+                request_id=_id(),
+                timestamp=ts,
+                request_method="POST",
+                request_url="https://api.internal/v1/recommendations",
+                request_headers=json.dumps({"Content-Type": "application/json"}),
+                request_body='{"user_id": "u_' + str(random.randint(1000, 9999)) + '", "context": "homepage"}',
+                winner_variant_id=var1b_id if lat_b < lat_a else var1a_id,
+                created_at=ts,
+            )
+            db.add(log)
+            db.flush()
+            db.add(models.VariantResult(
+                id=_id(), execution_log_id=log_id, variant_id=var1a_id,
+                status_code=200, latency_ms=lat_a,
+                response_body=json.dumps({"data": {"recommendations": recs_v1, "model_version": "v1.2.3", "click_through_rate": round(random.uniform(0.08, 0.14), 3)}}),
+                response_headers=json.dumps({"Content-Type": "application/json", "X-Model-Version": "v1.2.3"}),
+                payload_size_bytes=random.randint(480, 620),
+            ))
+            db.add(models.VariantResult(
+                id=_id(), execution_log_id=log_id, variant_id=var1b_id,
+                status_code=200, latency_ms=lat_b,
+                response_body=json.dumps({"data": {"recommendations": recs_v2, "model_version": "v2.0.1", "algorithm": "neural_collab", "click_through_rate": round(random.uniform(0.12, 0.20), 3)}}),
+                response_headers=json.dumps({"Content-Type": "application/json", "X-Model-Version": "v2.0.1"}),
+                payload_size_bytes=random.randint(510, 680),
             ))
 
+        # ── Experiment 2: Payment Gateway Comparison ──────────────────────────
+        exp2_id = _id()
+        var2a_id = _id()  # Stripe
+        var2b_id = _id()  # Adyen
+
+        exp2 = models.ApiExperiment(
+            id=exp2_id,
+            name="Payment Gateway A/B Test",
+            description="Compare Stripe vs Adyen for checkout success rate, latency, and error handling",
+            status="running",
+            execution_mode="ab",
+            environment="staging",
+            method="POST",
+            base_url="https://checkout.internal",
+            path="/v2/charge",
+            query_params=json.dumps({}),
+            body_template='{"amount": {{amount}}, "currency": "{{currency}}", "payment_method": "{{pm_token}}"}',
+            request_headers=json.dumps({"Content-Type": "application/json", "Idempotency-Key": "{{idem_key}}"}),
+            auth_type="bearer",
+            auth_value="***",
+            timeout_ms=8000,
+            max_retries=1,
+            scoring_rules=json.dumps({
+                "success_status": 200,
+                "latency_weight": 0.3,
+                "error_weight": 0.5,
+                "business_metric_weight": 0.2,
+                "business_metric_path": "data.success"
+            }),
+            created_at=datetime.utcnow() - timedelta(days=9),
+        )
+        db.add(exp2)
+        db.add(models.ApiVariant(
+            id=var2a_id, experiment_id=exp2_id,
+            name="Stripe Gateway", variant_type="service_routing",
+            description="Stripe payment processing via gateway proxy",
+            weight=50, target_url="https://stripe-proxy.internal/charge",
+        ))
+        db.add(models.ApiVariant(
+            id=var2b_id, experiment_id=exp2_id,
+            name="Adyen Gateway", variant_type="service_routing",
+            description="Adyen payment processing via gateway proxy",
+            weight=50, target_url="https://adyen-proxy.internal/charge",
+        ))
         db.flush()
 
-        # Seed round 1 results
-        scores = [82.4, 74.1, 68.7, 61.2]
-        for rank, (tid, score) in enumerate(zip(team_ids, scores), 1):
-            db.add(models.RoundResult(
-                id=_id(),
-                challenge_id=challenge_id,
-                team_id=tid,
-                round_number=1,
-                cvr=round(0.03 + random.random() * 0.08, 4),
-                engagement_score=round(45 + random.random() * 40, 1),
-                session_count=random.randint(800, 2500),
-                composite_score=score,
-                rank=rank,
-                computed_at=datetime.utcnow() - timedelta(days=7)
+        for i in range(10):
+            log_id = _id()
+            stripe_ok = random.random() > 0.03
+            adyen_ok = random.random() > 0.06
+            lat_a = round(random.uniform(180, 380), 1)
+            lat_b = round(random.uniform(220, 520), 1)
+            ts = datetime.utcnow() - timedelta(hours=random.randint(0, 48))
+            log = models.ExecutionLog(
+                id=log_id, experiment_id=exp2_id,
+                request_id=_id(), timestamp=ts,
+                request_method="POST",
+                request_url="https://checkout.internal/v2/charge",
+                request_body='{"amount": 9900, "currency": "USD"}',
+                winner_variant_id=var2a_id if stripe_ok and not adyen_ok else (var2b_id if adyen_ok and not stripe_ok else var2a_id),
+                created_at=ts,
+            )
+            db.add(log)
+            db.flush()
+            db.add(models.VariantResult(
+                id=_id(), execution_log_id=log_id, variant_id=var2a_id,
+                status_code=200 if stripe_ok else 402,
+                latency_ms=lat_a,
+                response_body=json.dumps({"data": {"success": stripe_ok, "charge_id": "ch_" + _id()[:12], "provider": "stripe"}} if stripe_ok else {"error": "card_declined", "provider": "stripe"}),
+                response_headers=json.dumps({"Content-Type": "application/json", "X-Request-Id": _id()[:8]}),
+                error_message=None if stripe_ok else "Card declined",
+                payload_size_bytes=random.randint(280, 420),
+            ))
+            db.add(models.VariantResult(
+                id=_id(), execution_log_id=log_id, variant_id=var2b_id,
+                status_code=200 if adyen_ok else 422,
+                latency_ms=lat_b,
+                response_body=json.dumps({"data": {"success": adyen_ok, "psp_reference": "psp_" + _id()[:12], "provider": "adyen"}} if adyen_ok else {"error": "refused", "provider": "adyen"}),
+                response_headers=json.dumps({"Content-Type": "application/json", "X-Adyen-Version": "71"}),
+                error_message=None if adyen_ok else "Refused by issuer",
+                payload_size_bytes=random.randint(310, 460),
             ))
 
-        # Seed round 2 results (current in-progress)
-        scores2 = [88.1, 71.3, 79.4, 55.8]
-        for rank_idx, (tid, score) in enumerate(zip(team_ids, scores2)):
-            sorted_rank = sorted(range(len(scores2)), key=lambda x: scores2[x], reverse=True).index(rank_idx) + 1
-            db.add(models.RoundResult(
-                id=_id(),
-                challenge_id=challenge_id,
-                team_id=tid,
-                round_number=2,
-                cvr=round(0.04 + random.random() * 0.09, 4),
-                engagement_score=round(50 + random.random() * 35, 1),
-                session_count=random.randint(1000, 3000),
-                composite_score=score,
-                rank=sorted_rank,
-                computed_at=datetime.utcnow() - timedelta(hours=2)
+        # ── Experiment 3: Search Service (Shadow Mode) ────────────────────────
+        exp3_id = _id()
+        var3a_id = _id()  # Elasticsearch
+        var3b_id = _id()  # Meilisearch
+
+        exp3 = models.ApiExperiment(
+            id=exp3_id,
+            name="Search Engine Shadow Test",
+            description="Shadow test Meilisearch against production Elasticsearch — compare relevance and latency",
+            status="running",
+            execution_mode="shadow",
+            environment="prod",
+            method="GET",
+            base_url="https://search.internal",
+            path="/v1/search",
+            query_params=json.dumps({"q": "{{query}}", "limit": "20", "offset": "0"}),
+            body_template="",
+            request_headers=json.dumps({"Accept": "application/json"}),
+            auth_type="api_key",
+            auth_value="***",
+            timeout_ms=300,
+            max_retries=0,
+            scoring_rules=json.dumps({
+                "success_status": 200,
+                "latency_weight": 0.5,
+                "error_weight": 0.4,
+                "business_metric_weight": 0.1,
+                "business_metric_path": "hits.total"
+            }),
+            created_at=datetime.utcnow() - timedelta(days=5),
+        )
+        db.add(exp3)
+        db.add(models.ApiVariant(
+            id=var3a_id, experiment_id=exp3_id,
+            name="Elasticsearch (Primary)", variant_type="service_routing",
+            description="Production Elasticsearch 8.x cluster",
+            weight=100, target_url="https://elastic.internal/search",
+        ))
+        db.add(models.ApiVariant(
+            id=var3b_id, experiment_id=exp3_id,
+            name="Meilisearch (Shadow)", variant_type="service_routing",
+            description="New Meilisearch v1.7 instance — shadow only, not returned to user",
+            weight=0, target_url="https://meili.internal/search",
+        ))
+        db.flush()
+
+        for i in range(15):
+            log_id = _id()
+            lat_a = round(random.uniform(55, 180), 1)
+            lat_b = round(random.uniform(12, 65), 1)
+            ts = datetime.utcnow() - timedelta(hours=random.randint(0, 24))
+            query_terms = ["laptop", "wireless headphones", "running shoes", "coffee maker", "gaming chair"]
+            q = random.choice(query_terms)
+            log = models.ExecutionLog(
+                id=log_id, experiment_id=exp3_id,
+                request_id=_id(), timestamp=ts,
+                request_method="GET",
+                request_url=f"https://search.internal/v1/search?q={q}&limit=20",
+                winner_variant_id=var3b_id,
+                created_at=ts,
+            )
+            db.add(log)
+            db.flush()
+            db.add(models.VariantResult(
+                id=_id(), execution_log_id=log_id, variant_id=var3a_id,
+                status_code=200, latency_ms=lat_a,
+                response_body=json.dumps({"hits": {"total": random.randint(18, 200), "hits": [{"_id": str(i), "_score": round(random.uniform(0.6, 1.0), 3)} for i in range(5)]}, "took": lat_a}),
+                response_headers=json.dumps({"Content-Type": "application/json", "X-Elastic-Product": "Elasticsearch"}),
+                payload_size_bytes=random.randint(1200, 2400),
+            ))
+            db.add(models.VariantResult(
+                id=_id(), execution_log_id=log_id, variant_id=var3b_id,
+                status_code=200, latency_ms=lat_b,
+                response_body=json.dumps({"hits": [{"id": str(i), "rankingScore": round(random.uniform(0.7, 1.0), 4)} for i in range(5)], "estimatedTotalHits": random.randint(18, 200), "processingTimeMs": round(lat_b)}),
+                response_headers=json.dumps({"Content-Type": "application/json", "X-Meili-Request-Id": _id()[:8]}),
+                payload_size_bytes=random.randint(980, 1800),
             ))
 
-        # Second challenge (draft)
-        ch2_id = _id()
-        db.add(models.Challenge(
-            id=ch2_id,
-            name="Winter Sprint Cup",
-            description="4-week optimization sprint for e-commerce teams.",
+        # ── Experiment 4: Auth Service Migration (Paused) ─────────────────────
+        exp4_id = _id()
+        var4a_id = _id()
+        var4b_id = _id()
+
+        exp4 = models.ApiExperiment(
+            id=exp4_id,
+            name="Auth Token Validation Migration",
+            description="Migrate from HS256 symmetric JWT to RS256 asymmetric — validate latency and compatibility",
+            status="paused",
+            execution_mode="ab",
+            environment="staging",
+            method="POST",
+            base_url="https://auth.internal",
+            path="/v2/validate",
+            query_params=json.dumps({}),
+            body_template='{"token": "{{jwt_token}}"}',
+            request_headers=json.dumps({"Content-Type": "application/json"}),
+            auth_type="none",
+            timeout_ms=200,
+            max_retries=0,
+            scoring_rules=json.dumps({
+                "success_status": 200,
+                "latency_weight": 0.5,
+                "error_weight": 0.5,
+            }),
+            created_at=datetime.utcnow() - timedelta(days=12),
+        )
+        db.add(exp4)
+        db.add(models.ApiVariant(
+            id=var4a_id, experiment_id=exp4_id,
+            name="HS256 (Current)", variant_type="config",
+            description="Symmetric HMAC-SHA256 token validation",
+            weight=50, target_url="https://auth-v1.internal/validate",
+            config_overrides=json.dumps({"algorithm": "HS256", "secret_ref": "jwt_secret_v1"}),
+        ))
+        db.add(models.ApiVariant(
+            id=var4b_id, experiment_id=exp4_id,
+            name="RS256 (New)", variant_type="config",
+            description="Asymmetric RSA-SHA256 token validation — PKCS#1",
+            weight=50, target_url="https://auth-v2.internal/validate",
+            config_overrides=json.dumps({"algorithm": "RS256", "public_key_ref": "jwt_pubkey_v2"}),
+        ))
+        db.flush()
+
+        for i in range(6):
+            log_id = _id()
+            lat_a = round(random.uniform(8, 22), 1)
+            lat_b = round(random.uniform(14, 38), 1)
+            ts = datetime.utcnow() - timedelta(hours=random.randint(12, 96))
+            log = models.ExecutionLog(
+                id=log_id, experiment_id=exp4_id,
+                request_id=_id(), timestamp=ts,
+                request_method="POST",
+                request_url="https://auth.internal/v2/validate",
+                winner_variant_id=var4a_id,
+                created_at=ts,
+            )
+            db.add(log)
+            db.flush()
+            db.add(models.VariantResult(
+                id=_id(), execution_log_id=log_id, variant_id=var4a_id,
+                status_code=200, latency_ms=lat_a,
+                response_body=json.dumps({"valid": True, "user_id": "u_" + str(random.randint(100, 999)), "exp": 1780000000, "alg": "HS256"}),
+                response_headers=json.dumps({"Content-Type": "application/json"}),
+                payload_size_bytes=random.randint(120, 180),
+            ))
+            db.add(models.VariantResult(
+                id=_id(), execution_log_id=log_id, variant_id=var4b_id,
+                status_code=200, latency_ms=lat_b,
+                response_body=json.dumps({"valid": True, "user_id": "u_" + str(random.randint(100, 999)), "exp": 1780000000, "alg": "RS256", "kid": "key-2026-01"}),
+                response_headers=json.dumps({"Content-Type": "application/json"}),
+                payload_size_bytes=random.randint(140, 200),
+            ))
+
+        # ── Experiment 5: ML Inference Pipeline (Concluded) ───────────────────
+        exp5_id = _id()
+        var5a_id = _id()  # Model v3.1 (old champion)
+        var5b_id = _id()  # Model v4.0 (new winner)
+
+        exp5 = models.ApiExperiment(
+            id=exp5_id,
+            name="ML Inference Pipeline v4 Rollout",
+            description="Concluded: Model v4.0-beta won against v3.1 on all metrics — now in production",
+            status="concluded",
+            execution_mode="champion_challenger",
+            environment="prod",
+            method="POST",
+            base_url="https://inference.internal",
+            path="/v1/predict",
+            query_params=json.dumps({}),
+            body_template='{"features": {{features}}, "model_hint": "{{model_hint}}"}',
+            request_headers=json.dumps({"Content-Type": "application/json", "X-Priority": "normal"}),
+            auth_type="bearer",
+            auth_value="***",
+            timeout_ms=1000,
+            max_retries=1,
+            scoring_rules=json.dumps({
+                "success_status": 200,
+                "latency_weight": 0.35,
+                "error_weight": 0.35,
+                "business_metric_weight": 0.3,
+                "business_metric_path": "prediction.confidence"
+            }),
+            created_at=datetime.utcnow() - timedelta(days=45),
+            concluded_at=datetime.utcnow() - timedelta(days=8),
+        )
+        db.add(exp5)
+        db.add(models.ApiVariant(
+            id=var5a_id, experiment_id=exp5_id,
+            name="Model v3.1 (Champion)", variant_type="model",
+            description="Production gradient boosting model v3.1.4",
+            weight=50, target_url="https://inference-v3.internal/predict",
+        ))
+        db.add(models.ApiVariant(
+            id=var5b_id, experiment_id=exp5_id,
+            name="Model v4.0-beta (Challenger)", variant_type="model",
+            description="New transformer-based model v4.0-beta — 3.2x faster, +8% accuracy",
+            weight=50, target_url="https://inference-v4.internal/predict",
+        ))
+        exp5.winner_variant_id = var5b_id
+        db.flush()
+
+        for i in range(8):
+            log_id = _id()
+            lat_a = round(random.uniform(280, 520), 1)
+            lat_b = round(random.uniform(85, 165), 1)
+            ts = datetime.utcnow() - timedelta(days=random.randint(9, 40))
+            log = models.ExecutionLog(
+                id=log_id, experiment_id=exp5_id,
+                request_id=_id(), timestamp=ts,
+                request_method="POST",
+                request_url="https://inference.internal/v1/predict",
+                winner_variant_id=var5b_id,
+                created_at=ts,
+            )
+            db.add(log)
+            db.flush()
+            db.add(models.VariantResult(
+                id=_id(), execution_log_id=log_id, variant_id=var5a_id,
+                status_code=200, latency_ms=lat_a,
+                response_body=json.dumps({"prediction": {"label": random.choice(["positive", "negative"]), "confidence": round(random.uniform(0.72, 0.88), 3), "model_version": "v3.1.4"}}),
+                response_headers=json.dumps({"Content-Type": "application/json", "X-Model": "gbm-v3"}),
+                payload_size_bytes=random.randint(280, 360),
+            ))
+            db.add(models.VariantResult(
+                id=_id(), execution_log_id=log_id, variant_id=var5b_id,
+                status_code=200, latency_ms=lat_b,
+                response_body=json.dumps({"prediction": {"label": random.choice(["positive", "negative"]), "confidence": round(random.uniform(0.89, 0.97), 3), "model_version": "v4.0-beta", "tokens_used": random.randint(128, 256)}}),
+                response_headers=json.dumps({"Content-Type": "application/json", "X-Model": "transformer-v4"}),
+                payload_size_bytes=random.randint(320, 410),
+            ))
+
+        # ── Experiment 6: CDN Cache Strategy (Draft) ──────────────────────────
+        exp6_id = _id()
+        exp6 = models.ApiExperiment(
+            id=exp6_id,
+            name="CDN Cache Strategy Evaluation",
+            description="Compare aggressive TTL caching vs stale-while-revalidate strategy for product catalog API",
             status="draft",
-            scoring_config=json.dumps({"cvr_weight": 0.5, "engagement_weight": 0.3, "session_volume_weight": 0.2}),
-            total_rounds=4,
-            current_round=1,
-            owner_id="demo-user-id"
+            execution_mode="shadow",
+            environment="dev",
+            method="GET",
+            base_url="https://catalog.internal",
+            path="/v1/products",
+            query_params=json.dumps({"category": "{{category}}", "page": "{{page}}"}),
+            request_headers=json.dumps({"Accept": "application/json"}),
+            auth_type="api_key",
+            timeout_ms=400,
+            max_retries=1,
+            scoring_rules=json.dumps({
+                "success_status": 200,
+                "latency_weight": 0.6,
+                "error_weight": 0.3,
+                "business_metric_weight": 0.1,
+            }),
+            created_at=datetime.utcnow() - timedelta(days=2),
+        )
+        db.add(exp6)
+        db.add(models.ApiVariant(
+            id=_id(), experiment_id=exp6_id,
+            name="Aggressive TTL (1h)", variant_type="config",
+            description="Cache all product API responses for 1 hour",
+            weight=50, target_url="https://cdn-proxy.internal/catalog",
+            config_overrides=json.dumps({"cache_ttl": 3600, "strategy": "aggressive"}),
+        ))
+        db.add(models.ApiVariant(
+            id=_id(), experiment_id=exp6_id,
+            name="Stale-While-Revalidate", variant_type="config",
+            description="Serve stale data immediately, revalidate in background (max-age=60, stale=300)",
+            weight=50, target_url="https://cdn-proxy2.internal/catalog",
+            config_overrides=json.dumps({"strategy": "swr", "max_age": 60, "stale_ttl": 300}),
         ))
 
         db.commit()

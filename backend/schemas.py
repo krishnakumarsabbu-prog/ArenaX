@@ -5,53 +5,99 @@ from enum import Enum
 
 
 class ExperimentStatus(str, Enum):
-    draft     = "draft"
-    running   = "running"
-    paused    = "paused"
-    concluded = "concluded"
+    draft      = "draft"
+    running    = "running"
+    paused     = "paused"
+    concluded  = "concluded"
 
 
-class GoalMetric(str, Enum):
-    conversion = "conversion"
-    click      = "click"
-    scroll     = "scroll"
+class ExecutionMode(str, Enum):
+    ab                  = "ab"
+    champion_challenger = "champion_challenger"
+    shadow              = "shadow"
+
+
+class HttpMethod(str, Enum):
+    GET    = "GET"
+    POST   = "POST"
+    PUT    = "PUT"
+    DELETE = "DELETE"
+    PATCH  = "PATCH"
+
+
+class AuthType(str, Enum):
+    none   = "none"
+    bearer = "bearer"
+    api_key = "api_key"
+    oauth2 = "oauth2"
+    mtls   = "mtls"
+
+
+class VariantType(str, Enum):
+    service_routing = "service_routing"
+    model           = "model"
+    feature_flag    = "feature_flag"
+    config          = "config"
 
 
 # ── Experiments ───────────────────────────────────────────────────────────────
 
+class ScoringRules(BaseModel):
+    success_status: int = 200
+    latency_weight: float = 0.4
+    error_weight: float = 0.4
+    business_metric_weight: float = 0.2
+    business_metric_path: Optional[str] = None
+
+
 class ExperimentCreate(BaseModel):
     name: str = Field(..., min_length=3, max_length=120)
-    url: str
-    hypothesis: Optional[str] = None
-    goal_metric: GoalMetric = GoalMetric.conversion
-    traffic_pct: float = Field(1.0, ge=0.01, le=1.0)
-    min_sessions: int = Field(1000, ge=100)
-    max_sessions: Optional[int] = None
-    confidence_threshold: float = Field(0.95, ge=0.80, le=0.99)
+    description: Optional[str] = ""
+    execution_mode: ExecutionMode = ExecutionMode.ab
+    environment: str = "staging"
+    method: HttpMethod = HttpMethod.GET
+    base_url: str
+    path: str = "/"
+    query_params: Dict[str, str] = {}
+    body_template: Optional[str] = ""
+    request_headers: Dict[str, str] = {}
+    auth_type: AuthType = AuthType.none
+    auth_value: Optional[str] = ""
+    timeout_ms: int = Field(5000, ge=100, le=60000)
+    max_retries: int = Field(0, ge=0, le=5)
+    scoring_rules: ScoringRules = ScoringRules()
 
 
 class ExperimentUpdate(BaseModel):
     name: Optional[str] = None
+    description: Optional[str] = None
     status: Optional[ExperimentStatus] = None
-    hypothesis: Optional[str] = None
+    execution_mode: Optional[ExecutionMode] = None
+    environment: Optional[str] = None
+    scoring_rules: Optional[ScoringRules] = None
 
 
 class ExperimentOut(BaseModel):
     id: str
     name: str
-    url: str
+    description: str
     status: ExperimentStatus
-    hypothesis: Optional[str]
-    goal_metric: GoalMetric
-    traffic_pct: float
-    min_sessions: int
-    confidence_threshold: float
-    created_at: datetime
-    concluded_at: Optional[datetime]
-    ai_verdict: Optional[Dict[str, Any]] = None
+    execution_mode: ExecutionMode
+    environment: str
+    method: HttpMethod
+    base_url: str
+    path: str
+    auth_type: AuthType
+    timeout_ms: int
+    max_retries: int
+    scoring_rules: Dict[str, Any]
     variant_count: int = 0
-    total_sessions: int = 0
-    leading_lift: Optional[float] = None
+    total_requests: int = 0
+    avg_latency_ms: float = 0.0
+    error_rate: float = 0.0
+    winner_variant_id: Optional[str] = None
+    created_at: datetime
+    concluded_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -59,197 +105,111 @@ class ExperimentOut(BaseModel):
 
 # ── Variants ─────────────────────────────────────────────────────────────────
 
-class VariantChange(BaseModel):
-    selector: str
-    property: str
-    value: str
-
-
 class VariantCreate(BaseModel):
     experiment_id: str
-    key: str = Field(..., pattern="^[a-z0-9_]+$")
-    name: str
-    description: Optional[str] = None
-    changes: List[VariantChange] = []
+    name: str = Field(..., min_length=1, max_length=80)
+    variant_type: VariantType = VariantType.service_routing
+    description: Optional[str] = ""
+    weight: int = Field(50, ge=0, le=100)
+    target_url: str = ""
+    feature_flags: Dict[str, Any] = {}
+    config_overrides: Dict[str, Any] = {}
 
 
 class VariantOut(BaseModel):
     id: str
     experiment_id: str
-    key: str
     name: str
-    description: Optional[str]
-    traffic_weight: float
-    alpha: float
-    beta: float
-    changes: List[VariantChange]
-    impressions: int = 0
-    conversions: int = 0
-    cvr: float = 0.0
+    variant_type: VariantType
+    description: str
+    weight: int
+    target_url: str
+    feature_flags: Dict[str, Any]
+    config_overrides: Dict[str, Any]
+    avg_latency_ms: float = 0.0
+    error_rate: float = 0.0
+    request_count: int = 0
+    score: float = 0.0
+    created_at: datetime
 
     class Config:
         from_attributes = True
 
 
-# ── Events ────────────────────────────────────────────────────────────────────
+# ── Execution ─────────────────────────────────────────────────────────────────
 
-class EventType(str, Enum):
-    impression = "impression"
-    conversion = "conversion"
-    click      = "click"
-    scroll     = "scroll"
-
-
-class EventIngest(BaseModel):
+class ExecuteRequest(BaseModel):
     experiment_id: str
+    request_body: Optional[Dict[str, Any]] = None
+    request_headers: Optional[Dict[str, str]] = None
+    path_params: Optional[Dict[str, str]] = None
+
+
+class VariantResultOut(BaseModel):
     variant_id: str
-    fingerprint: str
-    event_type: EventType
-    metadata: Optional[Dict[str, Any]] = None
-    device_type: Optional[str] = None
-    country: Optional[str] = None
-    is_new_user: bool = False
-    session_depth: int = 1
+    variant_name: str
+    status_code: int
+    latency_ms: float
+    response_body: Dict[str, Any]
+    response_headers: Dict[str, str]
+    error: Optional[str]
+    payload_size_bytes: int
+
+
+class ExecutionLogOut(BaseModel):
+    id: str
+    experiment_id: str
+    request_id: str
+    timestamp: datetime
+    request_method: str
+    request_url: str
+    winner_variant_id: Optional[str]
+    variant_results: List[VariantResultOut] = []
+
+    class Config:
+        from_attributes = True
 
 
 # ── Analytics ─────────────────────────────────────────────────────────────────
 
-class VariantStats(BaseModel):
+class VariantMetrics(BaseModel):
     variant_id: str
-    variant_key: str
     variant_name: str
-    impressions: int
-    conversions: int
-    cvr: float
-    traffic_weight: float
-    lift_vs_control: Optional[float]
-    confidence: float
+    request_count: int
+    avg_latency_ms: float
+    p50_latency_ms: float
+    p95_latency_ms: float
+    p99_latency_ms: float
+    error_rate: float
+    success_rate: float
+    avg_payload_size: float
+    score: float
 
 
-class SegmentStats(BaseModel):
-    segment: str
-    value: str
-    winner_variant: str
-    lift: float
-
-
-class ExperimentAnalytics(BaseModel):
+class ExperimentAnalyticsOut(BaseModel):
     experiment_id: str
-    total_sessions: int
-    overall_confidence: float
-    leading_variant: Optional[str]
-    variant_stats: List[VariantStats]
-    segment_breakdown: Dict[str, List[SegmentStats]]
-    days_running: int
-    estimated_days_remaining: Optional[int]
-
-
-# ── Challenges ────────────────────────────────────────────────────────────────
-
-class ScoringConfig(BaseModel):
-    cvr_weight: float = Field(0.6, ge=0.0, le=1.0)
-    engagement_weight: float = Field(0.25, ge=0.0, le=1.0)
-    session_volume_weight: float = Field(0.15, ge=0.0, le=1.0)
-
-
-class ChallengeCreate(BaseModel):
-    name: str = Field(..., min_length=3, max_length=120)
-    description: Optional[str] = None
-    scoring_config: ScoringConfig
-    total_rounds: int = Field(3, ge=1, le=10)
-    start_date: Optional[datetime] = None
-    end_date: Optional[datetime] = None
-
-
-class ChallengeOut(BaseModel):
-    id: str
-    name: str
-    status: str
-    current_round: int
-    total_rounds: int
-    team_count: int = 0
-    top_team: Optional[str] = None
-    top_score: Optional[float] = None
-
-    class Config:
-        from_attributes = True
-
-
-# ── Teams ─────────────────────────────────────────────────────────────────────
-
-class TeamCreate(BaseModel):
-    challenge_id: str
-    name: str
-    url: str
-    members: List[str] = []
-
-
-class TeamOut(BaseModel):
-    id: str
-    challenge_id: str
-    name: str
-    url: str
-    members: List[str]
-    latest_score: Optional[float] = None
-    rank: Optional[int] = None
-
-    class Config:
-        from_attributes = True
+    total_requests: int
+    avg_latency_ms: float
+    error_rate: float
+    winner_variant_id: Optional[str]
+    variant_metrics: List[VariantMetrics]
+    latency_trend: List[Dict[str, Any]]
 
 
 # ── AI ────────────────────────────────────────────────────────────────────────
 
-class AISynthesisRequest(BaseModel):
+class AIInsightOut(BaseModel):
     experiment_id: str
-
-
-class AIChampionRequest(BaseModel):
-    challenge_id: str
-    team_id: str
-
-
-class AIVerdictOut(BaseModel):
-    hypothesis_confirmed: bool
-    verdict_summary: str
     winner_variant: Optional[str]
-    key_segments: List[str]
-    next_tests: List[str]
-    raw_analysis: str
+    winner_reason: str
+    risk_warnings: List[str]
+    performance_summary: str
+    recommendation: str
+    suggested_next_experiments: List[str]
+    confidence: str
 
 
-# ── Security / RBAC ────────────────────────────────────────────────────────────
-
-class PermissionOut(BaseModel):
-    id: str
-    name: str
-    resource: str
-    action: str
-    description: Optional[str]
-
-    class Config:
-        from_attributes = True
-
-
-class RoleCreate(BaseModel):
-    name: str = Field(..., min_length=2, max_length=64)
-    description: Optional[str] = None
-    permission_ids: List[str] = []
-
-
-class RoleOut(BaseModel):
-    id: str
-    name: str
-    description: Optional[str]
-    permissions: List[PermissionOut] = []
-
-    class Config:
-        from_attributes = True
-
-
-class UserRoleAssign(BaseModel):
-    user_id: str
-    role_id: str
-
+# ── Security (kept for admin panel) ──────────────────────────────────────────
 
 class APITokenCreate(BaseModel):
     name: str = Field(..., min_length=2, max_length=80)
@@ -288,9 +248,3 @@ class AuditLogOut(BaseModel):
 
     class Config:
         from_attributes = True
-
-
-class RateLimitConfig(BaseModel):
-    key: str
-    limit: int = Field(100, ge=1)
-    window_seconds: int = Field(60, ge=1)
