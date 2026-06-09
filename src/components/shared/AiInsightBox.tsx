@@ -1,4 +1,4 @@
-import { Sparkles, Loader2 } from 'lucide-react'
+import { Sparkles, Loader as Loader2 } from 'lucide-react'
 
 interface Props {
   color: 'blue' | 'teal'

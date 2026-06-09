@@ -1,6 +1,6 @@
 import { useAdvanceRound, useBracket } from '@/api/hooks/useChallenges'
 import Badge from '@/components/shared/Badge'
-import { ChevronRight, Loader2 } from 'lucide-react'
+import { ChevronRight, Loader as Loader2 } from 'lucide-react'
 import type { BracketTeam } from '@/types'
 
 interface Props {

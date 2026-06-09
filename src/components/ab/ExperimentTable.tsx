@@ -1,4 +1,4 @@
-import { Eye, Play, Pause, CheckCircle } from 'lucide-react'
+import { Eye, Play, Pause, CircleCheck as CheckCircle } from 'lucide-react'
 import Badge from '@/components/shared/Badge'
 import ProgressBar from '@/components/shared/ProgressBar'
 import { useUpdateExperiment } from '@/api/hooks/useExperiments'
