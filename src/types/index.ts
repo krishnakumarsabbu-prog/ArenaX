@@ -167,3 +167,66 @@ export interface ChallengeCreate {
   start_date?: string
   end_date?: string
 }
+
+// ── Security / RBAC ───────────────────────────────────────────────────────────
+
+export interface Permission {
+  id: string
+  name: string
+  resource: string
+  action: string
+  description: string | null
+}
+
+export interface Role {
+  id: string
+  name: string
+  description: string | null
+  permissions: Permission[]
+}
+
+export interface RoleCreate {
+  name: string
+  description?: string
+  permission_ids: string[]
+}
+
+export interface APIToken {
+  id: string
+  name: string
+  prefix: string
+  scopes: string[]
+  is_active: boolean
+  last_used: string | null
+  expires_at: string | null
+  created_at: string
+}
+
+export interface APITokenCreated extends APIToken {
+  token: string
+}
+
+export interface APITokenCreate {
+  name: string
+  scopes: string[]
+  expires_at?: string
+}
+
+export interface AuditLog {
+  id: string
+  user_id: string | null
+  action: string
+  resource: string
+  resource_id: string | null
+  details: string | null
+  ip_address: string | null
+  status: string
+  created_at: string
+}
+
+export interface RateLimitStatus {
+  key: string
+  count: number
+  window_end?: string
+  active_window: boolean
+}

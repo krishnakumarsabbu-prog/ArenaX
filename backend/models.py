@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Float, Integer, DateTime, Text, ForeignKey
+from sqlalchemy import Column, String, Float, Integer, DateTime, Text, ForeignKey, Boolean, UniqueConstraint
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -126,3 +126,84 @@ class RoundResult(Base):
     computed_at      = Column(DateTime, default=datetime.utcnow)
 
     challenge = relationship("Challenge", back_populates="round_results")
+
+
+# ── Security / RBAC ───────────────────────────────────────────────────────────
+
+class Role(Base):
+    __tablename__ = "roles"
+    id          = Column(String, primary_key=True, default=gen_id)
+    name        = Column(String, unique=True, nullable=False)
+    description = Column(Text)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+    permissions = relationship("RolePermission", back_populates="role", cascade="all, delete-orphan")
+    user_roles  = relationship("UserRole", back_populates="role", cascade="all, delete-orphan")
+
+
+class Permission(Base):
+    __tablename__ = "permissions"
+    id          = Column(String, primary_key=True, default=gen_id)
+    name        = Column(String, unique=True, nullable=False)
+    resource    = Column(String, nullable=False)
+    action      = Column(String, nullable=False)
+    description = Column(Text)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (UniqueConstraint("resource", "action", name="uq_resource_action"),)
+
+
+class RolePermission(Base):
+    __tablename__ = "role_permissions"
+    role_id       = Column(String, ForeignKey("roles.id"), primary_key=True)
+    permission_id = Column(String, ForeignKey("permissions.id"), primary_key=True)
+
+    role       = relationship("Role", back_populates="permissions")
+    permission = relationship("Permission")
+
+
+class UserRole(Base):
+    __tablename__ = "user_roles"
+    user_id    = Column(String, ForeignKey("users.id"), primary_key=True)
+    role_id    = Column(String, ForeignKey("roles.id"), primary_key=True)
+    granted_by = Column(String, ForeignKey("users.id"))
+    granted_at = Column(DateTime, default=datetime.utcnow)
+
+    role = relationship("Role", back_populates="user_roles")
+
+
+class APIToken(Base):
+    __tablename__ = "api_tokens"
+    id         = Column(String, primary_key=True, default=gen_id)
+    user_id    = Column(String, ForeignKey("users.id"), nullable=False)
+    name       = Column(String, nullable=False)
+    token_hash = Column(String, unique=True, nullable=False)
+    prefix     = Column(String, nullable=False)
+    scopes     = Column(Text, default="[]")
+    is_active  = Column(Boolean, default=True)
+    last_used  = Column(DateTime)
+    expires_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id          = Column(String, primary_key=True, default=gen_id)
+    user_id     = Column(String, ForeignKey("users.id"))
+    action      = Column(String, nullable=False)
+    resource    = Column(String, nullable=False)
+    resource_id = Column(String)
+    details     = Column(Text)
+    ip_address  = Column(String)
+    user_agent  = Column(String)
+    status      = Column(String, default="success")
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+
+class RateLimitBucket(Base):
+    __tablename__ = "rate_limit_buckets"
+    id         = Column(String, primary_key=True, default=gen_id)
+    key        = Column(String, unique=True, nullable=False)
+    count      = Column(Integer, default=0)
+    window_end = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)

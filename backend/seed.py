@@ -6,10 +6,169 @@ import random
 
 from database import SessionLocal
 import models
+from services.rbac import generate_token
 
 
 def _id():
     return str(uuid.uuid4())
+
+
+def _seed_rbac(db, user_id: str):
+    """Seed permissions, roles, and assign admin role to demo user."""
+
+    # Permissions matrix: resource → [actions]
+    permission_defs = [
+        ("experiments", "read"),
+        ("experiments", "write"),
+        ("experiments", "delete"),
+        ("variants",    "read"),
+        ("variants",    "write"),
+        ("variants",    "delete"),
+        ("events",      "read"),
+        ("events",      "write"),
+        ("analytics",   "read"),
+        ("challenges",  "read"),
+        ("challenges",  "write"),
+        ("challenges",  "delete"),
+        ("teams",       "read"),
+        ("teams",       "write"),
+        ("leaderboard", "read"),
+        ("ai",          "read"),
+        ("ai",          "write"),
+        ("users",       "read"),
+        ("users",       "write"),
+        ("roles",       "read"),
+        ("roles",       "write"),
+        ("roles",       "delete"),
+        ("audit_logs",  "read"),
+        ("api_tokens",  "read"),
+        ("api_tokens",  "write"),
+    ]
+
+    perms = {}
+    for resource, action in permission_defs:
+        name = f"{resource}:{action}"
+        p = models.Permission(
+            id=_id(),
+            name=name,
+            resource=resource,
+            action=action,
+            description=f"Can {action} {resource}",
+        )
+        db.add(p)
+        perms[name] = p
+
+    db.flush()
+
+    # Roles
+    admin_role = models.Role(
+        id=_id(),
+        name="admin",
+        description="Full platform access",
+    )
+    editor_role = models.Role(
+        id=_id(),
+        name="editor",
+        description="Can manage experiments and challenges",
+    )
+    viewer_role = models.Role(
+        id=_id(),
+        name="viewer",
+        description="Read-only access",
+    )
+    analyst_role = models.Role(
+        id=_id(),
+        name="analyst",
+        description="Read experiments and analytics; can trigger AI synthesis",
+    )
+
+    db.add_all([admin_role, editor_role, viewer_role, analyst_role])
+    db.flush()
+
+    # Assign all permissions to admin
+    for p in perms.values():
+        db.add(models.RolePermission(role_id=admin_role.id, permission_id=p.id))
+
+    # Editor: read/write experiments, variants, challenges, teams; read analytics/leaderboard/ai
+    editor_perm_names = [
+        "experiments:read", "experiments:write",
+        "variants:read", "variants:write",
+        "events:read", "events:write",
+        "analytics:read",
+        "challenges:read", "challenges:write",
+        "teams:read", "teams:write",
+        "leaderboard:read",
+        "ai:read", "ai:write",
+        "users:read",
+        "roles:read",
+    ]
+    for name in editor_perm_names:
+        if name in perms:
+            db.add(models.RolePermission(role_id=editor_role.id, permission_id=perms[name].id))
+
+    # Viewer: read-only everything
+    viewer_perm_names = [
+        "experiments:read", "variants:read", "events:read", "analytics:read",
+        "challenges:read", "teams:read", "leaderboard:read", "ai:read",
+        "users:read", "roles:read",
+    ]
+    for name in viewer_perm_names:
+        if name in perms:
+            db.add(models.RolePermission(role_id=viewer_role.id, permission_id=perms[name].id))
+
+    # Analyst: read experiments/analytics + trigger AI
+    analyst_perm_names = [
+        "experiments:read", "variants:read", "analytics:read",
+        "ai:read", "ai:write", "leaderboard:read",
+    ]
+    for name in analyst_perm_names:
+        if name in perms:
+            db.add(models.RolePermission(role_id=analyst_role.id, permission_id=perms[name].id))
+
+    db.flush()
+
+    # Assign admin role to demo user
+    db.add(models.UserRole(user_id=user_id, role_id=admin_role.id, granted_by=user_id))
+    db.flush()
+
+    # Seed a demo API token
+    raw_token, prefix, token_hash = generate_token()
+    demo_token = models.APIToken(
+        id=_id(),
+        user_id=user_id,
+        name="Demo API Token",
+        token_hash=token_hash,
+        prefix=prefix,
+        scopes=json.dumps(["experiments:read", "analytics:read"]),
+        is_active=True,
+    )
+    db.add(demo_token)
+    db.flush()
+
+    # Seed some audit log entries
+    audit_entries = [
+        ("create", "experiment", "Checkout CTA Copy Test", "success"),
+        ("update", "experiment", "Homepage Hero Image", "success"),
+        ("delete", "variant", "old-variant-id", "success"),
+        ("create", "challenge", "Q3 Growth Hackathon", "success"),
+        ("assign_role", "user", user_id, "success"),
+        ("create_token", "api_token", demo_token.id, "success"),
+    ]
+    for action, resource, resource_id, status in audit_entries:
+        db.add(models.AuditLog(
+            id=_id(),
+            user_id=user_id,
+            action=action,
+            resource=resource,
+            resource_id=resource_id,
+            details=f"{action} on {resource}",
+            ip_address="127.0.0.1",
+            user_agent="XTest/1.0 seed",
+            status=status,
+            created_at=datetime.utcnow() - timedelta(hours=random.randint(1, 72)),
+        ))
+
+    db.flush()
 
 
 def seed_demo_data():
@@ -28,6 +187,9 @@ def seed_demo_data():
         )
         db.add(user)
         db.flush()
+
+        # ── RBAC ───────────────────────────────────────────────────────────────
+        _seed_rbac(db, "demo-user-id")
 
         # ── Experiments ────────────────────────────────────────────────────────
         experiments_data = [

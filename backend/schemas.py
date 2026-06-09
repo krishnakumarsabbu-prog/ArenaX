@@ -215,3 +215,82 @@ class AIVerdictOut(BaseModel):
     key_segments: List[str]
     next_tests: List[str]
     raw_analysis: str
+
+
+# ── Security / RBAC ────────────────────────────────────────────────────────────
+
+class PermissionOut(BaseModel):
+    id: str
+    name: str
+    resource: str
+    action: str
+    description: Optional[str]
+
+    class Config:
+        from_attributes = True
+
+
+class RoleCreate(BaseModel):
+    name: str = Field(..., min_length=2, max_length=64)
+    description: Optional[str] = None
+    permission_ids: List[str] = []
+
+
+class RoleOut(BaseModel):
+    id: str
+    name: str
+    description: Optional[str]
+    permissions: List[PermissionOut] = []
+
+    class Config:
+        from_attributes = True
+
+
+class UserRoleAssign(BaseModel):
+    user_id: str
+    role_id: str
+
+
+class APITokenCreate(BaseModel):
+    name: str = Field(..., min_length=2, max_length=80)
+    scopes: List[str] = []
+    expires_at: Optional[datetime] = None
+
+
+class APITokenOut(BaseModel):
+    id: str
+    name: str
+    prefix: str
+    scopes: List[str]
+    is_active: bool
+    last_used: Optional[datetime]
+    expires_at: Optional[datetime]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class APITokenCreated(APITokenOut):
+    token: str
+
+
+class AuditLogOut(BaseModel):
+    id: str
+    user_id: Optional[str]
+    action: str
+    resource: str
+    resource_id: Optional[str]
+    details: Optional[str]
+    ip_address: Optional[str]
+    status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class RateLimitConfig(BaseModel):
+    key: str
+    limit: int = Field(100, ge=1)
+    window_seconds: int = Field(60, ge=1)
