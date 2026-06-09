@@ -10,7 +10,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('ab')
 
   return (
-    <div className="min-h-screen bg-gray-50 font-sans">
+    <div className="min-h-screen font-sans" style={{ background: '#F3F4F8' }}>
       <Topbar />
       <TabBar activeTab={activeTab} onTabChange={setActiveTab} />
       <main className="max-w-7xl mx-auto px-6 py-6">

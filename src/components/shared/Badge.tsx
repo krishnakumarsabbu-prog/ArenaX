@@ -27,7 +27,7 @@ interface Props {
 export default function Badge({ status, label }: Props) {
   const dot = dots[status]
   return (
-    <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full ${styles[status] ?? styles.draft}`}>
+    <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-full ${styles[status] ?? styles.draft}`}>
       {dot && (
         <span className={`w-1.5 h-1.5 rounded-full ${dot} animate-pulse`} />
       )}
