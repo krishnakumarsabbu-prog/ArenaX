@@ -5,15 +5,14 @@ import { useStore } from './data/store'
 
 import DashboardPage from './pages/DashboardPage'
 import ExperimentsPage from './pages/ExperimentsPage'
-import APIBuilderPage from './pages/APIBuilderPage'
-import CockpitPage from './pages/CockpitPage'
-import AnalyticsPage from './pages/AnalyticsPage'
-import AIInsightsPage from './pages/AIInsightsPage'
-import ExecutionLogsPage from './pages/ExecutionLogsPage'
-import ResponseComparatorPage from './pages/ResponseComparatorPage'
-import UsersPage from './pages/admin/UsersPage'
-import SettingsPage from './pages/admin/SettingsPage'
-import IntegrationsPage from './pages/admin/IntegrationsPage'
+import ABBuilderPage from './pages/ABBuilderPage'
+import ABCockpitPage from './pages/ABCockpitPage'
+import ABAnalyticsPage from './pages/ABAnalyticsPage'
+import CCExperimentsPage from './pages/CCExperimentsPage'
+import CCBuilderPage from './pages/CCBuilderPage'
+import CCCockpitPage from './pages/CCCockpitPage'
+import CCAnalyticsPage from './pages/CCAnalyticsPage'
+import SettingsPage from './pages/SettingsPage'
 
 export default function App() {
   const { activePage, tickLive } = useStore()
@@ -23,19 +22,20 @@ export default function App() {
     return () => clearInterval(id)
   }, [tickLive])
 
-  const Page = {
-    dashboard:            DashboardPage,
-    experiments:          ExperimentsPage,
-    'api-builder':        APIBuilderPage,
-    cockpit:              CockpitPage,
-    analytics:            AnalyticsPage,
-    'ai-insights':        AIInsightsPage,
-    'execution-logs':     ExecutionLogsPage,
-    'response-comparator': ResponseComparatorPage,
-    users:                UsersPage,
-    settings:             SettingsPage,
-    integrations:         IntegrationsPage,
-  }[activePage]
+  const pages: Record<string, React.ComponentType> = {
+    dashboard: DashboardPage,
+    'ab-experiments': ExperimentsPage,
+    'ab-builder': ABBuilderPage,
+    'ab-cockpit': ABCockpitPage,
+    'ab-analytics': ABAnalyticsPage,
+    'cc-experiments': CCExperimentsPage,
+    'cc-builder': CCBuilderPage,
+    'cc-cockpit': CCCockpitPage,
+    'cc-analytics': CCAnalyticsPage,
+    settings: SettingsPage,
+  }
+
+  const Page = pages[activePage] ?? DashboardPage
 
   return (
     <div className="flex min-h-screen bg-[#0A0F1E] font-sans">

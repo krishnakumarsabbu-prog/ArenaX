@@ -1,1 +1,1 @@
-export { default } from './BracketsPage'
+export default function Page() { return null }

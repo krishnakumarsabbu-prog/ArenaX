@@ -1,39 +1,36 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 
-from database import engine, Base, SessionLocal
-from routers import api_experiments, api_execution, api_analytics, api_ai
 from seed import seed_demo_data
+from routers import ab_experiments, cc_experiments, execution, analytics_v2
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Base.metadata.create_all(bind=engine)
     seed_demo_data()
     yield
 
 
 app = FastAPI(
-    title="XTest API Lab",
+    title="XTest API Lab 2.0",
     version="2.0.0",
-    description="Real-time API Experimentation, Traffic Splitting & Response Comparison Platform",
+    description="Dual-mode API experimentation — A/B Traffic Split + Champion vs Challenger",
     lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "*"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(api_experiments.router, prefix="/api/experiments",  tags=["Experiments"])
-app.include_router(api_execution.router,   prefix="/api/executions",   tags=["Execution Logs"])
-app.include_router(api_analytics.router,   prefix="/api/analytics",    tags=["Analytics"])
-app.include_router(api_ai.router,          prefix="/api/ai",           tags=["AI Insights"])
+app.include_router(ab_experiments.router, prefix="/api/ab",         tags=["A/B Experiments"])
+app.include_router(cc_experiments.router, prefix="/api/cc",         tags=["CC Experiments"])
+app.include_router(execution.router,      prefix="/api/exec",       tags=["Execution"])
+app.include_router(analytics_v2.router,   prefix="/api/analytics",  tags=["Analytics"])
 
 
 @app.get("/api/health")

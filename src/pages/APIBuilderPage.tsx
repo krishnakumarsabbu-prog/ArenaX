@@ -1,1 +1,1 @@
-export { default } from './VariantDesignerPage'
+export default function Page() { return null }

@@ -1,132 +1,270 @@
-import { useState } from 'react'
-import { Plus, Search, FlaskConical, Play, Pause, Trash2, ChevronRight, Filter } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import { Search, Play, Pause, Trash2, Plus, RotateCcw, Zap } from 'lucide-react'
+import { abApi } from '../api/client'
+import type { ABExperiment } from '../types'
 import { useStore } from '../data/store'
-import { ApiExperiment } from '../types'
 
-const STATUS_STYLES: Record<string, string> = {
-  running: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
-  paused: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-  concluded: 'bg-slate-500/20 text-slate-400 border-slate-500/30',
-  draft: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
+  const colors: Record<string, string> = {
+    running: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+    paused: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
+    draft: 'bg-slate-500/20 text-slate-300 border-slate-500/30',
+    concluded: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
+  }
+  return (
+    <span className={`px-2.5 py-1 rounded-full text-xs font-medium border ${colors[status] || colors.draft}`}>
+      {status.charAt(0).toUpperCase() + status.slice(1)}
+    </span>
+  )
 }
 
-const MODE_STYLES: Record<string, string> = {
-  ab: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-  champion_challenger: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-  shadow: 'bg-slate-500/20 text-slate-400 border-slate-500/30',
-}
+const ExperimentsPage: React.FC = () => {
+  const [experiments, setExperiments] = useState<ABExperiment[]>([])
+  const [filteredExperiments, setFilteredExperiments] = useState<ABExperiment[]>([])
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState<'all' | 'running' | 'paused' | 'draft' | 'concluded'>('all')
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const { setPage, selectExperiment } = useStore()
 
-const MODE_LABELS: Record<string, string> = {
-  ab: 'A/B Test',
-  champion_challenger: 'Champion/Challenger',
-  shadow: 'Shadow Mode',
-}
+  const fetchExperiments = async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true)
+    else setLoading(true)
+    try {
+      const res = await abApi.list()
+      const data = res.data || []
+      setExperiments(data)
+      applyFilters(data, search, filter)
+    } catch (error) {
+      console.error('Failed to fetch experiments:', error)
+    } finally {
+      if (isRefresh) setRefreshing(false)
+      else setLoading(false)
+    }
+  }
 
-const ENV_DOT: Record<string, string> = {
-  prod: 'bg-red-400',
-  staging: 'bg-amber-400',
-  dev: 'bg-slate-400',
-}
+  useEffect(() => {
+    fetchExperiments()
+  }, [])
 
-const AUTH_LABELS: Record<string, string> = {
-  none: 'None',
-  bearer: 'Bearer Token',
-  api_key: 'API Key',
-  oauth2: 'OAuth2',
-  mtls: 'mTLS',
-}
+  const applyFilters = (data: ABExperiment[], searchTerm: string, statusFilter: string) => {
+    let filtered = data
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter((e) => e.status === statusFilter)
+    }
+    if (searchTerm) {
+      filtered = filtered.filter((e) =>
+        e.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        e.description.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    }
+    setFilteredExperiments(filtered)
+  }
 
-type FilterStatus = 'all' | ApiExperiment['status']
+  const handleSearch = (value: string) => {
+    setSearch(value)
+    applyFilters(experiments, value, filter)
+  }
 
-export default function ExperimentsPage() {
-  const { experiments, updateExperimentStatus, setPage, selectExperiment } = useStore()
-  const [query, setQuery] = useState('')
-  const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
-  const [filterMode, setFilterMode] = useState<string>('all')
+  const handleFilter = (newFilter: typeof filter) => {
+    setFilter(newFilter)
+    applyFilters(experiments, search, newFilter)
+  }
 
-  const filtered = experiments.filter((e) => {
-    const matchQ = e.name.toLowerCase().includes(query.toLowerCase()) ||
-      e.request_config.base_url.toLowerCase().includes(query.toLowerCase()) ||
-      e.request_config.path.toLowerCase().includes(query.toLowerCase())
-    const matchS = filterStatus === 'all' || e.status === filterStatus
-    const matchM = filterMode === 'all' || e.execution_mode === filterMode
-    return matchQ && matchS && matchM
-  })
+  const handleToggleStatus = async (id: string, currentStatus: string) => {
+    const newStatus = currentStatus === 'running' ? 'paused' : 'running'
+    try {
+      await abApi.update(id, { status: newStatus })
+      fetchExperiments()
+    } catch (error) {
+      console.error('Failed to update experiment:', error)
+    }
+  }
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this experiment?')) return
+    try {
+      await abApi.delete(id)
+      fetchExperiments()
+    } catch (error) {
+      console.error('Failed to delete experiment:', error)
+    }
+  }
+
+  const handleCockpit = (experimentId: string) => {
+    selectExperiment(experimentId)
+    setPage('ab-cockpit')
+  }
 
   return (
-    <div className="p-6 space-y-5 max-w-screen-2xl">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-slate-100">API Experiments</h2>
-          <p className="text-sm text-slate-500 mt-0.5">
-            {experiments.filter((e) => e.status === 'running').length} running ·{' '}
-            {experiments.length} total
-          </p>
-        </div>
-        <button
-          onClick={() => setPage('api-builder')}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          New Experiment
-        </button>
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2 flex-1 min-w-48 bg-[#0D1117] border border-white/10 rounded-lg px-3 py-2">
-          <Search className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
-          <input
-            type="text"
-            placeholder="Search experiments, endpoints…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="flex-1 bg-transparent text-sm text-slate-200 placeholder-slate-600 outline-none"
-          />
-        </div>
-        <div className="flex items-center gap-2">
-          <Filter className="w-3.5 h-3.5 text-slate-500" />
-          {(['all', 'running', 'paused', 'draft', 'concluded'] as FilterStatus[]).map((s) => (
+    <div className="min-h-screen bg-[#0A0F1E] text-slate-100 p-8">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-3xl font-bold text-white mb-2">A/B Experiments</h1>
+            <p className="text-slate-400">Create and manage A/B tests</p>
+          </div>
+          <div className="flex gap-3">
             <button
-              key={s}
-              onClick={() => setFilterStatus(s)}
-              className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors capitalize
-                ${filterStatus === s ? 'bg-blue-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+              onClick={() => fetchExperiments(true)}
+              disabled={refreshing}
+              className="px-4 py-2 rounded-lg border border-white/8 bg-white/5 hover:bg-white/10 text-slate-100 flex items-center gap-2 disabled:opacity-50"
             >
-              {s}
+              <RotateCcw size={18} className={refreshing ? 'animate-spin' : ''} />
+              Refresh
             </button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2">
-          {(['all', 'ab', 'champion_challenger', 'shadow']).map((m) => (
             <button
-              key={m}
-              onClick={() => setFilterMode(m)}
-              className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors
-                ${filterMode === m ? 'bg-blue-600 text-white' : 'bg-white/5 text-slate-400 hover:bg-white/10'}`}
+              onClick={() => setPage('ab-builder')}
+              className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2"
             >
-              {m === 'all' ? 'All Modes' : m === 'champion_challenger' ? 'C/C' : m === 'ab' ? 'A/B' : 'Shadow'}
+              <Plus size={18} />
+              New Experiment
             </button>
-          ))}
+          </div>
         </div>
-      </div>
 
-      {/* Cards grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-        {filtered.map((exp) => (
-          <ExperimentCard
-            key={exp.id}
-            exp={exp}
-            onView={() => { selectExperiment(exp.id); setPage('cockpit') }}
-            onStatusToggle={(newStatus) => updateExperimentStatus(exp.id, newStatus)}
-          />
-        ))}
-        {filtered.length === 0 && (
-          <div className="col-span-3 flex flex-col items-center justify-center py-20 text-center">
-            <FlaskConical className="w-10 h-10 text-slate-600 mb-3" />
-            <p className="text-slate-400 font-medium">No experiments match your filters</p>
-            <p className="text-slate-600 text-sm mt-1">Try adjusting the search or filters above</p>
+        {/* Search & Filters */}
+        <div className="mb-8">
+          <div className="mb-4 relative">
+            <Search className="absolute left-3 top-3 text-slate-500" size={20} />
+            <input
+              type="text"
+              placeholder="Search experiments..."
+              value={search}
+              onChange={(e) => handleSearch(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 rounded-lg bg-[#0D1117] border border-white/8 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500/50"
+            />
+          </div>
+
+          <div className="flex gap-2 flex-wrap">
+            {(['all', 'running', 'paused', 'draft', 'concluded'] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => handleFilter(f)}
+                className={`px-4 py-2 rounded-lg border transition-all ${
+                  filter === f
+                    ? 'bg-blue-600 border-blue-500 text-white'
+                    : 'border-white/8 bg-white/5 text-slate-300 hover:bg-white/10'
+                }`}
+              >
+                {f.charAt(0).toUpperCase() + f.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Experiments Grid */}
+        {loading ? (
+          <div className="flex items-center justify-center h-96">
+            <div className="animate-spin rounded-full h-12 w-12 border-2 border-slate-700 border-t-blue-500" />
+          </div>
+        ) : filteredExperiments.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-96 text-center">
+            <Zap className="text-slate-600 mb-4" size={48} />
+            <h3 className="text-xl font-medium text-slate-300 mb-2">No experiments found</h3>
+            <p className="text-slate-500 mb-6">Get started by creating your first A/B experiment</p>
+            <button
+              onClick={() => setPage('ab-builder')}
+              className="px-6 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2"
+            >
+              <Plus size={18} />
+              Create Experiment
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+            {filteredExperiments.map((exp) => (
+              <div
+                key={exp.id}
+                className="bg-[#0D1117] border border-white/8 rounded-lg p-6 hover:border-white/12 transition-all"
+              >
+                {/* Header */}
+                <div className="mb-4">
+                  <h3 className="text-lg font-semibold text-white mb-1">{exp.name}</h3>
+                  <p className="text-sm text-slate-400 line-clamp-2">{exp.description}</p>
+                  <div className="flex gap-2 mt-3">
+                    <StatusBadge status={exp.status} />
+                    <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                      {exp.method}
+                    </span>
+                  </div>
+                </div>
+
+                {/* URL */}
+                <div className="mb-4 p-3 bg-white/5 rounded-lg border border-white/5">
+                  <p className="text-xs text-slate-500 mb-1">URL</p>
+                  <p className="text-sm text-slate-300 break-all font-mono">
+                    {exp.base_url}/{exp.path}
+                  </p>
+                </div>
+
+                {/* Metrics */}
+                <div className="grid grid-cols-3 gap-2 mb-4">
+                  <div className="bg-white/5 rounded-lg p-2 text-center">
+                    <p className="text-xs text-slate-500">Requests</p>
+                    <p className="text-sm font-semibold text-slate-100">{exp.total_requests}</p>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-2 text-center">
+                    <p className="text-xs text-slate-500">Latency</p>
+                    <p className="text-sm font-semibold text-slate-100">{Math.round(exp.avg_latency_ms)}ms</p>
+                  </div>
+                  <div className="bg-white/5 rounded-lg p-2 text-center">
+                    <p className="text-xs text-slate-500">Error</p>
+                    <p className="text-sm font-semibold text-slate-100">{(exp.error_rate * 100).toFixed(1)}%</p>
+                  </div>
+                </div>
+
+                {/* Variant Distribution */}
+                <div className="mb-4">
+                  <p className="text-xs text-slate-500 mb-2">Variant Distribution</p>
+                  <div className="flex h-2 rounded-full overflow-hidden bg-white/5 border border-white/10">
+                    {exp.variants.map((v, idx) => {
+                      const colors = ['bg-blue-500', 'bg-blue-600', 'bg-blue-700', 'bg-blue-800', 'bg-blue-900']
+                      return (
+                        <div
+                          key={v.id}
+                          style={{ width: `${v.weight}%` }}
+                          className={`${colors[idx % colors.length]}`}
+                        />
+                      )
+                    })}
+                  </div>
+                  <div className="flex gap-3 mt-2 text-xs">
+                    {exp.variants.map((v) => (
+                      <div key={v.id}>
+                        <span className="text-slate-400">{v.name}</span>
+                        <span className="text-slate-500 ml-1">{v.weight}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleCockpit(exp.id)}
+                    className="flex-1 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium flex items-center justify-center gap-2"
+                  >
+                    <Zap size={16} />
+                    Cockpit
+                  </button>
+                  <button
+                    onClick={() => handleToggleStatus(exp.id, exp.status)}
+                    className="px-3 py-2 rounded-lg border border-white/8 bg-white/5 hover:bg-white/10 text-slate-100"
+                    title={exp.status === 'running' ? 'Pause' : 'Play'}
+                  >
+                    {exp.status === 'running' ? <Pause size={16} /> : <Play size={16} />}
+                  </button>
+                  <button
+                    onClick={() => handleDelete(exp.id)}
+                    className="px-3 py-2 rounded-lg border border-white/8 bg-white/5 hover:bg-red-500/20 text-slate-100 hover:text-red-300"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -134,120 +272,4 @@ export default function ExperimentsPage() {
   )
 }
 
-function ExperimentCard({
-  exp,
-  onView,
-  onStatusToggle,
-}: {
-  exp: ApiExperiment
-  onView: () => void
-  onStatusToggle: (status: ApiExperiment['status']) => void
-}) {
-  return (
-    <div className="bg-[#0D1117] border border-white/5 rounded-xl overflow-hidden hover:border-white/10 transition-all group">
-      {/* Card header */}
-      <div className="px-4 pt-4 pb-3 border-b border-white/5">
-        <div className="flex items-start justify-between gap-3 mb-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className={`w-2 h-2 rounded-full flex-shrink-0 ${ENV_DOT[exp.environment] || 'bg-slate-400'}`} />
-            <h3 className="text-[13px] font-semibold text-slate-200 truncate">{exp.name}</h3>
-          </div>
-          <span className={`text-[11px] px-2 py-0.5 rounded-full border font-semibold flex-shrink-0 capitalize ${STATUS_STYLES[exp.status]}`}>
-            {exp.status}
-          </span>
-        </div>
-        <p className="text-[11px] text-slate-500 leading-relaxed line-clamp-2">{exp.description}</p>
-      </div>
-
-      {/* Endpoint */}
-      <div className="px-4 py-3 border-b border-white/5 bg-white/[0.01]">
-        <div className="flex items-center gap-2">
-          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded font-mono ${
-            exp.request_config.method === 'GET' ? 'bg-emerald-500/20 text-emerald-400'
-            : exp.request_config.method === 'POST' ? 'bg-blue-500/20 text-blue-400'
-            : exp.request_config.method === 'DELETE' ? 'bg-red-500/20 text-red-400'
-            : 'bg-amber-500/20 text-amber-400'
-          }`}>
-            {exp.request_config.method}
-          </span>
-          <span className="text-[11px] text-slate-400 font-mono truncate flex-1">
-            {exp.request_config.base_url}{exp.request_config.path}
-          </span>
-        </div>
-      </div>
-
-      {/* Metrics */}
-      <div className="grid grid-cols-3 px-4 py-3 border-b border-white/5">
-        <div className="text-center">
-          <div className="text-base font-bold text-slate-100">
-            {exp.total_requests > 0 ? (exp.total_requests / 1000).toFixed(1) + 'k' : '—'}
-          </div>
-          <div className="text-[10px] text-slate-500 mt-0.5">requests</div>
-        </div>
-        <div className="text-center border-x border-white/5">
-          <div className={`text-base font-bold ${
-            exp.avg_latency_ms > 0 && exp.avg_latency_ms < 100 ? 'text-emerald-400'
-            : exp.avg_latency_ms < 300 ? 'text-amber-400'
-            : exp.avg_latency_ms > 0 ? 'text-red-400'
-            : 'text-slate-500'
-          }`}>
-            {exp.avg_latency_ms > 0 ? exp.avg_latency_ms + 'ms' : '—'}
-          </div>
-          <div className="text-[10px] text-slate-500 mt-0.5">avg latency</div>
-        </div>
-        <div className="text-center">
-          <div className={`text-base font-bold ${
-            exp.error_rate === 0 ? 'text-slate-500'
-            : exp.error_rate < 1 ? 'text-emerald-400'
-            : exp.error_rate < 3 ? 'text-amber-400'
-            : 'text-red-400'
-          }`}>
-            {exp.total_requests > 0 ? exp.error_rate.toFixed(1) + '%' : '—'}
-          </div>
-          <div className="text-[10px] text-slate-500 mt-0.5">error rate</div>
-        </div>
-      </div>
-
-      {/* Tags + actions */}
-      <div className="px-4 py-3 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className={`text-[10px] px-2 py-0.5 rounded-full border font-semibold ${MODE_STYLES[exp.execution_mode]}`}>
-            {MODE_LABELS[exp.execution_mode]}
-          </span>
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-slate-400 font-medium capitalize">
-            {exp.environment}
-          </span>
-          <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 border border-white/10 text-slate-400 font-medium">
-            {AUTH_LABELS[exp.auth_config.type]}
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          {exp.status === 'running' && (
-            <button
-              onClick={() => onStatusToggle('paused')}
-              className="p-1.5 rounded-lg text-slate-500 hover:text-amber-400 hover:bg-amber-500/10 transition-colors"
-              title="Pause experiment"
-            >
-              <Pause className="w-3.5 h-3.5" />
-            </button>
-          )}
-          {exp.status === 'paused' && (
-            <button
-              onClick={() => onStatusToggle('running')}
-              className="p-1.5 rounded-lg text-slate-500 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors"
-              title="Resume experiment"
-            >
-              <Play className="w-3.5 h-3.5" />
-            </button>
-          )}
-          <button
-            onClick={onView}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600/20 border border-blue-500/30 text-blue-400 text-xs font-semibold hover:bg-blue-600/30 transition-colors"
-          >
-            View <ChevronRight className="w-3 h-3" />
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
+export default ExperimentsPage

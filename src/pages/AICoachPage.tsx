@@ -1,1 +1,1 @@
-export { default } from './AIInsightsPage'
+export default function Page() { return null }

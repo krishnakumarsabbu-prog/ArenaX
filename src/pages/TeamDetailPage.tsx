@@ -1,1 +1,1 @@
-export { default } from './AnalyticsPage'
+export default function Page() { return null }

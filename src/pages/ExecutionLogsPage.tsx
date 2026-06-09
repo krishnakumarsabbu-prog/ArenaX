@@ -1,1 +1,1 @@
-export { default } from './TournamentsPage'
+export default function Page() { return null }
